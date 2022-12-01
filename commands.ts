@@ -65,7 +65,7 @@ export function handleRollCommand(
       : rollCommandDefaultValue[RollCommandOption.Sides];
 
   const quantityOption = options.find(
-    (option) => option.name === RollCommandOption.Sides
+    (option) => option.name === RollCommandOption.Quantity
   );
   const quantity =
     quantityOption?.type === ApplicationCommandOptionType.Integer
