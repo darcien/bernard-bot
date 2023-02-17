@@ -14,7 +14,7 @@ import {
   APIInteraction,
   InteractionType,
 } from "https://deno.land/x/discord_api_types@0.37.19/v10.ts";
-import { handleRollCommand, knownCommands } from "./commands.ts";
+import { handleCommands, knownCommands } from "./commands.ts";
 
 // For all requests to "/" endpoint, we want to invoke home() handler.
 serve({
@@ -71,8 +71,7 @@ async function home(request: Request) {
       return json({ error: "Unknown command" }, { status: 400 });
     }
 
-    // This is fine, we only have 1 command for now.
-    const { responseText } = handleRollCommand(interactionData);
+    const { responseText } = handleCommands(interactionData);
 
     return json({
       // Type 4 responds with the below message retaining the user's

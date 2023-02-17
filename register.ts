@@ -20,10 +20,10 @@ async function upsertCommand(
   });
   switch (result.status) {
     case 200:
-      console.log(`Success creating command /${body.name}`);
+      console.log(`Success updating command /${body.name}`);
       break;
     case 201:
-      console.log(`Success upserting command /${body.name}`);
+      console.log(`Success creating new command /${body.name}`);
       break;
     default:
       console.log(`Fail upserting command /${body.name}`, await result.json());

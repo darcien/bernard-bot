@@ -14,12 +14,12 @@ export enum CommandName {
   Roll = "roll",
 }
 
-export enum RollCommandOption {
+enum RollCommandOption {
   Sides = "sides",
   Quantity = "quantity",
 }
 
-export const rollCommandDefaultValue = {
+const rollCommandDefaultValue = {
   [RollCommandOption.Sides]: 6,
   [RollCommandOption.Quantity]: 1,
 };
@@ -51,10 +51,10 @@ const rollCommand = makeCommand({
   ],
 });
 
-export function handleRollCommand(
-  data: APIChatInputApplicationCommandInteractionData
+function handleRollCommand(
+  interactionData: APIChatInputApplicationCommandInteractionData
 ) {
-  const options = data.options || [];
+  const options = interactionData.options || [];
 
   const sidesOption = options.find(
     (option) => option.name === RollCommandOption.Sides
@@ -82,6 +82,17 @@ export function handleRollCommand(
 
 function roll(sides: number) {
   return Math.floor(Math.random() * sides + 1);
+}
+
+const commandHandlerMap: Record<CommandName, typeof handleRollCommand> = {
+  [CommandName.Roll]: handleRollCommand,
+};
+
+export function handleCommands(
+  data: APIChatInputApplicationCommandInteractionData
+) {
+  const handler = commandHandlerMap[data.name as CommandName];
+  return handler(data);
 }
 
 export const commands = [rollCommand];
