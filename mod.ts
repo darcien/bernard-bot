@@ -7,7 +7,7 @@ import {
   sign,
   validateRequest,
 } from "./deps.ts";
-import { handleCommands, knownCommands } from "./commands.ts";
+import { handleCommands } from "./commands.ts";
 
 // For all requests to "/" endpoint, we want to invoke home() handler.
 serve({
@@ -61,10 +61,6 @@ async function home(request: Request) {
     const interactionData =
       data as APIChatInputApplicationCommandInteractionData;
 
-    if (!knownCommands.has(interactionData.name)) {
-      return json({ error: "Unknown command" }, { status: 400 });
-    }
-
     if (channel?.id == null) {
       return json({ error: "Channel missing from interaction" }, {
         status: 400,
@@ -81,19 +77,23 @@ async function home(request: Request) {
     }
 
     try {
-      const { responseText } = await handleCommands({
+      const handlerOutput = await handleCommands({
         interactionData,
         user,
         channelId: channel.id,
         guildId: guild_id,
       });
 
+      if (handlerOutput == null) {
+        return json({ error: "Unknown command" }, { status: 400 });
+      }
+
       return json({
         // Type 4 responds with the below message retaining the user's
         // input at the top.
         type: 4,
         data: {
-          content: responseText,
+          content: handlerOutput.responseText,
         },
       });
     } catch (rError: unknown) {
