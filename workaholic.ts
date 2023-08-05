@@ -134,7 +134,8 @@ function formatWorkaholicAddCommand(
 }
 
 function parseMessageForSummary(message: APIMessage) {
-  const [_prefix, userMention, when, what, duration, type] = message.content
+  const [_prefix, userMention = "", when, what, duration, type] = message
+    .content
     .split(
       separator,
     );
