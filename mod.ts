@@ -42,8 +42,8 @@ async function home(request: Request) {
     );
   }
 
-  const { type = 0, data = { options: [] }, member, channel_id, guild_id } =
-    JSON.parse(
+  const { type = 0, data = { options: [] }, member, channel, guild_id } = JSON
+    .parse(
       body,
     ) as APIInteraction;
 
@@ -65,8 +65,8 @@ async function home(request: Request) {
       return json({ error: "Unknown command" }, { status: 400 });
     }
 
-    if (channel_id == null) {
-      return json({ error: "Channel id missing from interaction" }, {
+    if (channel?.id == null) {
+      return json({ error: "Channel missing from interaction" }, {
         status: 400,
       });
     }
@@ -84,7 +84,7 @@ async function home(request: Request) {
       const { responseText } = await handleCommands({
         interactionData,
         user,
-        channelId: channel_id,
+        channelId: channel.id,
         guildId: guild_id,
       });
 
