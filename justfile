@@ -28,3 +28,6 @@ delete-registered commandId:
 deploy:
   # Make sure $DISCORD_PUBLIC_KEY is set in the deployed env
   deployctl deploy --project="bernard-the-4th" ./mod.ts --token=$DENO_DEPLOY_TOKEN
+
+deploy-prod:
+  deployctl deploy --project="bernard-the-4th" ./mod.ts --token=$DENO_DEPLOY_TOKEN --prod

@@ -1,10 +1,13 @@
 import { configSync as loadConfig } from "https://deno.land/std@0.166.0/dotenv/mod.ts";
+import { makeDiscordApiUrl } from "./discord_api.ts";
 
 const config = loadConfig({ safe: true });
 
 function makeDeleteCommandUrl(commandId: string) {
   // https://discord.com/developers/docs/interactions/application-commands#delete-global-application-command
-  return `https://discord.com/api/v10/applications/${config.DISCORD_APPLICATION_ID}/commands/${commandId}`;
+  return makeDiscordApiUrl(
+    `/applications/${config.DISCORD_APPLICATION_ID}/commands/${commandId}`,
+  );
 }
 
 async function deleteCommand() {
@@ -15,7 +18,7 @@ async function deleteCommand() {
 
   if (!commandId) {
     throw new Error(
-      `Missing command id to delete. Please use ${idArgName} argument.`
+      `Missing command id to delete. Please use ${idArgName} argument.`,
     );
   }
   console.log(`Deleting command id=${commandId}...`);

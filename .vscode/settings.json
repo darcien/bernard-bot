@@ -20,5 +20,13 @@
     "titleBar.inactiveBackground": "#9ab09599",
     "titleBar.inactiveForeground": "#15202b99"
   },
-  "peacock.color": "#9ab095"
+  "peacock.color": "#9ab095",
+  "[typescript]": {
+    "editor.autoClosingBrackets": "languageDefined",
+    "editor.defaultFormatter": "denoland.vscode-deno"
+  },
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "*.ts": "${capture}.ts, ${capture}_test.ts",
+  },
 }

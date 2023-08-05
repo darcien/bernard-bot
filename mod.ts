@@ -45,13 +45,14 @@ async function home(request: Request) {
       { error: "Invalid request" },
       {
         status: 401,
-      }
+      },
     );
   }
 
-  const { type = 0, data = { options: [] } } = JSON.parse(
-    body
-  ) as APIInteraction;
+  const { type = 0, data = { options: [] }, member, channel_id, guild_id } =
+    JSON.parse(
+      body,
+    ) as APIInteraction;
 
   // Discord performs Ping interactions to test our application.
   // Type 1 in a request implies a Ping interaction.
@@ -71,16 +72,51 @@ async function home(request: Request) {
       return json({ error: "Unknown command" }, { status: 400 });
     }
 
-    const { responseText } = handleCommands(interactionData);
+    if (channel_id == null) {
+      return json({ error: "Channel id missing from interaction" }, {
+        status: 400,
+      });
+    }
+    if (guild_id == null) {
+      return json({ error: "Guild id missing from interaction" }, {
+        status: 400,
+      });
+    }
+    const user = member?.user;
+    if (user == null) {
+      return json({ error: "User missing from interaction" }, { status: 400 });
+    }
 
-    return json({
-      // Type 4 responds with the below message retaining the user's
-      // input at the top.
-      type: 4,
-      data: {
-        content: responseText,
-      },
-    });
+    try {
+      const { responseText } = await handleCommands({
+        interactionData,
+        user,
+        channelId: channel_id,
+        guildId: guild_id,
+      });
+
+      return json({
+        // Type 4 responds with the below message retaining the user's
+        // input at the top.
+        type: 4,
+        data: {
+          content: responseText,
+        },
+      });
+    } catch (rError: unknown) {
+      const error = rError instanceof Error
+        ? rError
+        : new Error(String(rError));
+
+      return json({
+        type: 4,
+        data: {
+          content: `💣💥 Oops, debug time!
+Error: ${error.message}
+Stack: ${error.stack || "No stack trace"}`,
+        },
+      });
+    }
   }
 
   // We will return a bad request error as a valid Discord request
@@ -90,7 +126,7 @@ async function home(request: Request) {
 
 /** Verify whether the request is coming from Discord. */
 async function verifySignature(
-  request: Request
+  request: Request,
 ): Promise<{ valid: boolean; body: string }> {
   const PUBLIC_KEY = Deno.env.get("DISCORD_PUBLIC_KEY")!;
   // Discord sends these headers with every request.
@@ -100,7 +136,7 @@ async function verifySignature(
   const valid = nacl.sign.detached.verify(
     new TextEncoder().encode(timestamp + body),
     hexToUint8Array(signature),
-    hexToUint8Array(PUBLIC_KEY)
+    hexToUint8Array(PUBLIC_KEY),
   );
 
   return { valid, body };
