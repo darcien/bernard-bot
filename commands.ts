@@ -4,9 +4,9 @@ import {
   APIMessage,
   APIUser,
   ApplicationCommandOptionType,
+  markdownTable,
   RESTPostAPIChatInputApplicationCommandsJSONBody,
-} from "https://deno.land/x/discord_api_types@0.37.19/v10.ts";
-import { markdownTable } from "https://esm.sh/markdown-table@3.0.3";
+} from "./deps.ts";
 import { getGuildMembers, getMessagesFromChannel } from "./discord_api.ts";
 
 function makeCommand(

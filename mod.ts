@@ -1,19 +1,12 @@
-// Sift is a small routing library that abstracts away details like starting a
-// listener on a port, and provides a simple function (serve) that has an API
-// to invoke a function for a specific path.
-import {
-  json,
-  serve,
-  validateRequest,
-} from "https://deno.land/x/sift@0.6.0/mod.ts";
-// TweetNaCl is a cryptography library that we use to verify requests
-// from Discord.
-import nacl from "https://cdn.skypack.dev/tweetnacl@v1.0.3?dts";
 import {
   APIChatInputApplicationCommandInteractionData,
   APIInteraction,
   InteractionType,
-} from "https://deno.land/x/discord_api_types@0.37.19/v10.ts";
+  json,
+  serve,
+  sign,
+  validateRequest,
+} from "./deps.ts";
 import { handleCommands, knownCommands } from "./commands.ts";
 
 // For all requests to "/" endpoint, we want to invoke home() handler.
@@ -133,7 +126,7 @@ async function verifySignature(
   const signature = request.headers.get("X-Signature-Ed25519")!;
   const timestamp = request.headers.get("X-Signature-Timestamp")!;
   const body = await request.text();
-  const valid = nacl.sign.detached.verify(
+  const valid = sign.detached.verify(
     new TextEncoder().encode(timestamp + body),
     hexToUint8Array(signature),
     hexToUint8Array(PUBLIC_KEY),

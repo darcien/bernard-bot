@@ -1,11 +1,11 @@
-import { configSync as loadConfig } from "https://deno.land/std@0.166.0/dotenv/mod.ts";
 import {
+  loadSync,
   RESTGetAPIChannelMessagesResult,
   RESTGetAPIGuildMembersQuery,
   RESTGetAPIGuildMembersResult,
-} from "https://deno.land/x/discord_api_types@0.37.19/v10.ts";
+} from "./deps.ts";
 
-const config = loadConfig({ safe: true });
+const config = loadSync();
 
 const DISCORD_BASE_URL = "https://discord.com";
 const DISCORD_API_VERSION = 10;

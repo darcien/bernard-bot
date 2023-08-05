@@ -1,9 +1,11 @@
-import { configSync as loadConfig } from "https://deno.land/std@0.166.0/dotenv/mod.ts";
-import { RESTPostAPIChatInputApplicationCommandsJSONBody } from "https://deno.land/x/discord_api_types@0.37.19/v10.ts";
 import { commands } from "./commands.ts";
 import { makeDiscordApiUrl } from "./discord_api.ts";
+import {
+  loadSync,
+  RESTPostAPIChatInputApplicationCommandsJSONBody,
+} from "./deps.ts";
 
-const config = loadConfig({ safe: true });
+const config = loadSync();
 
 // https://discord.com/developers/docs/interactions/application-commands#create-global-application-command
 const createCommandUrl = makeDiscordApiUrl(

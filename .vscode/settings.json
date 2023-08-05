@@ -27,6 +27,6 @@
   },
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.patterns": {
-    "*.ts": "${capture}.ts, ${capture}_test.ts",
-  },
+    "*.ts": "${capture}.ts, ${capture}_test.ts"
+  }
 }

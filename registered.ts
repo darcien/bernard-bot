@@ -1,7 +1,7 @@
-import { configSync as loadConfig } from "https://deno.land/std@0.166.0/dotenv/mod.ts";
+import { loadSync } from "./deps.ts";
 import { makeDiscordApiUrl } from "./discord_api.ts";
 
-const config = loadConfig({ safe: true });
+const config = loadSync();
 
 // https://discord.com/developers/docs/interactions/application-commands#get-global-application-commands
 const getAllCommandsUrl = makeDiscordApiUrl(
