@@ -4,6 +4,7 @@ import {
   APIMessage,
   APIUser,
   ApplicationCommandOptionType,
+  mapNotNullish,
   markdownTable,
 } from "./deps.ts";
 import { getGuildMembers, getMessagesFromChannel } from "./discord_api.ts";
@@ -20,7 +21,7 @@ enum WorkaholicAddCommandOption {
   Type = "type",
 }
 
-enum WorkaholicType {
+export enum WorkaholicType {
   Overtime = "Overtime",
   PriorityHours = "Priority Hours",
 }
@@ -111,9 +112,10 @@ function sanitizeWorkaholicAdd(
   };
 }
 
-const prefix = "♿";
-const separator = " | ";
-function formatWorkaholicAddCommand(
+const prefix = "🐴";
+// https://www.ascii-code.com/character/%E2%90%9F
+const separator = "\u001f";
+export function formatWorkaholicAddCommand(
   raw: RawWorkaholicToAdd & { userId: APIUser["id"] },
 ) {
   const {
@@ -126,25 +128,33 @@ function formatWorkaholicAddCommand(
     prefix,
     // Mention the user sending the command
     `<@${raw.userId}>`,
-    when,
-    what,
-    duration,
     type,
+    when,
+    `${duration}h`,
+    what,
   ].join(separator);
 }
 
-function parseMessageForSummary(message: APIMessage) {
-  const [_prefix, userMention = "", when, what, duration, type] = message
+export function parseMessageForSummary(message: APIMessage) {
+  const [_prefix, userMention, type, when, hDuration, what] = message
     .content
     .split(
       separator,
     );
 
+  if (
+    userMention == null || type == null || when == null || hDuration == null ||
+    what == null
+  ) {
+    return null;
+  }
+
   // userMention = <@1047114663546077236>
   const userId = userMention.slice(2, -1);
+  const duration = hDuration.slice(0, -1);
+
   return {
     userId,
-    userMention,
     what,
     when,
     duration,
@@ -152,12 +162,14 @@ function parseMessageForSummary(message: APIMessage) {
   };
 }
 
-function formatSummary(
+export function formatSummary(
   {
     workaholicMessages,
     nicknameByUserId,
   }: {
-    workaholicMessages: Array<ReturnType<typeof parseMessageForSummary>>;
+    workaholicMessages: Array<
+      NonNullable<ReturnType<typeof parseMessageForSummary>>
+    >;
     nicknameByUserId: ReturnType<typeof getNicknameByUserId>;
   },
 ) {
@@ -173,7 +185,7 @@ function formatSummary(
       header,
       // TODO: add sorting/grouping
       ...workaholicMessages.map((m) => [
-        nicknameByUserId.get(m.userId) || m.userMention,
+        nicknameByUserId.get(m.userId) || `<@${m.userId}>`,
         m.when,
         m.duration,
         m.what,
@@ -258,7 +270,10 @@ export async function handleWorkaholicCommand(
 
     const responseText = formatSummary(
       {
-        workaholicMessages: rWorkaholicMessages.map(parseMessageForSummary),
+        workaholicMessages: mapNotNullish(
+          rWorkaholicMessages,
+          parseMessageForSummary,
+        ),
         nicknameByUserId: getNicknameByUserId(guildMembers),
       },
     );

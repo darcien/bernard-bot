@@ -15,3 +15,5 @@ export * from "https://deno.land/x/discord_api_types@0.37.51/v10.ts";
 export { markdownTable } from "https://esm.sh/markdown-table@3.0.3";
 
 export { loadSync } from "https://deno.land/std@0.197.0/dotenv/mod.ts";
+
+export { mapNotNullish } from "https://deno.land/std@0.197.0/collections/map_not_nullish.ts";

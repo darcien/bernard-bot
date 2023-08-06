@@ -1,0 +1,13 @@
+export const snapshot = {};
+
+snapshot[`formatSummary 1`] = `
+"\`\`\`markdown
+| Who      | When   | How Long | What                                   | Type           |
+| -------- | ------ | -------- | -------------------------------------- | -------------- |
+| Capybara | 2 aug  | 2h       | do something cool                      | Overtime       |
+| Capybara | 3 aug  | 1h       | fix something awesome                  | Overtime       |
+| Yagi     | 7 aug  | 3h       | prod incident something something      | Overtime       |
+| Yagi     | 17 aug | 8h       | its holiday and im working             | Priority Hours |
+| Kaffu    | 30 aug | 2h       | need to finish this thing for showcase | Overtime       |
+\`\`\`"
+`;
