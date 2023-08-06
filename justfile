@@ -1,5 +1,7 @@
 set dotenv-load
 
+default-permission := "--allow-read=./ --allow-env --allow-net=discord.com"
+
 # List all available targets if just is executed with no arguments
 default:
   @just --list
@@ -14,20 +16,26 @@ install:
 
 # Register all commands to Discord application
 register:
-  deno run --allow-read=./ --allow-env --allow-net=discord.com ./register.ts
+  deno run {{default-permission}} ./register.ts
 
 # Get all registered commands in Discord application
 get-registered:
-  deno run --allow-read=./ --allow-env --allow-net=discord.com ./registered.ts
+  deno run {{default-permission}} ./registered.ts
 
 # Delete a registered command from Discord
 delete-registered commandId:
-  deno run --allow-read=./ --allow-env --allow-net=discord.com ./delete.ts --commandId="{{commandId}}"
+  deno run {{default-permission}} ./delete.ts --commandId="{{commandId}}"
 
 # Deploy the slash commands request handler to Deno Deploy
 deploy:
   # Make sure $DISCORD_PUBLIC_KEY is set in the deployed env
-  deployctl deploy --project="bernard-the-4th" ./mod.ts --token=$DENO_DEPLOY_TOKEN
+  deployctl deploy --project=$DENO_DEPLOY_PROJECT_NAME ./mod.ts --token=$DENO_DEPLOY_TOKEN
 
 deploy-prod:
-  deployctl deploy --project="bernard-the-4th" ./mod.ts --token=$DENO_DEPLOY_TOKEN --prod
+  deployctl deploy --project=$DENO_DEPLOY_PROJECT_NAME ./mod.ts --token=$DENO_DEPLOY_TOKEN --prod
+
+test:
+  deno test {{default-permission}}
+
+update-snapshot:
+  deno test {{default-permission}} --allow-write -- --update
