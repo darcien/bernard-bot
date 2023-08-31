@@ -2,12 +2,51 @@ import { assertEquals } from "https://deno.land/std@0.197.0/assert/mod.ts";
 import { assertSnapshot } from "https://deno.land/std@0.197.0/testing/snapshot.ts";
 
 import {
-  formatSummary,
   formatWorkaholicAddCommand,
+  isMessagePartialMatch,
+  makeSummaryTable,
   parseMessageForSummary,
   WorkaholicType,
 } from "./workaholic.ts";
 import { APIMessage } from "./deps.ts";
+
+Deno.test("isMessagePartialMatch", () => {
+  assertEquals(
+    isMessagePartialMatch("31 aug OT"),
+    true,
+  );
+  assertEquals(
+    isMessagePartialMatch("1 sep ot"),
+    true,
+  );
+  assertEquals(
+    isMessagePartialMatch("01 sep OT"),
+    true,
+  );
+  assertEquals(
+    isMessagePartialMatch("ot 2 jam"),
+    true,
+  );
+  assertEquals(
+    isMessagePartialMatch("OT 1hours"),
+    true,
+  );
+});
+
+Deno.test("isMessagePartialMatch", () => {
+  assertEquals(
+    isMessagePartialMatch("ot"),
+    false,
+  );
+  assertEquals(
+    isMessagePartialMatch("2 jam"),
+    false,
+  );
+  assertEquals(
+    isMessagePartialMatch("23 aug"),
+    false,
+  );
+});
 
 Deno.test("formatWorkaholicAddCommand", () => {
   const formatted = formatWorkaholicAddCommand({
@@ -19,7 +58,7 @@ Deno.test("formatWorkaholicAddCommand", () => {
   });
   assertEquals(
     formatted,
-    "🐴<@123>Overtime2021-01-017hmy lorem ipsum work",
+    "🐴 ⁃ <@123> ⁃ OT ⁃ 2021-01-01 ⁃ 7h ⁃ my lorem ipsum work",
   );
 });
 
@@ -47,10 +86,28 @@ Deno.test("parseMessageForSummary", () => {
     bad,
     null,
   );
+  assertEquals(
+    parseMessageForSummary(
+      { content: "🐴 ⁃ <@123> ⁃ OT ⁃ 2021-01-01 ⁃ 7h" } as APIMessage,
+    ),
+    null,
+  );
+  assertEquals(
+    parseMessageForSummary(
+      { content: "🐴 ⁃ <@123> ⁃ OT ⁃ 2021-01-01" } as APIMessage,
+    ),
+    null,
+  );
+  assertEquals(
+    parseMessageForSummary(
+      { content: "<@123> ⁃ OT ⁃ 2021-01-01" } as APIMessage,
+    ),
+    null,
+  );
 });
 
-Deno.test("formatSummary", async (t) => {
-  const summary = formatSummary({
+Deno.test("makeSummaryTable", async (t) => {
+  const summary = makeSummaryTable({
     workaholicMessages: [
       {
         when: "2 aug",

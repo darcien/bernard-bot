@@ -1,10 +1,13 @@
-import { CommandContext, makeCommand } from "./command_utils.ts";
+import {
+  CommandContext,
+  CommandHandlerResult,
+  makeCommand,
+} from "./command_utils.ts";
 import {
   APIApplicationCommandInteractionDataSubcommandOption,
   APIMessage,
   APIUser,
   ApplicationCommandOptionType,
-  mapNotNullish,
   markdownTable,
 } from "./deps.ts";
 import { getGuildMembers, getMessagesFromChannel } from "./discord_api.ts";
@@ -22,8 +25,8 @@ enum WorkaholicAddCommandOption {
 }
 
 export enum WorkaholicType {
-  Overtime = "Overtime",
-  PriorityHours = "Priority Hours",
+  Overtime = "OT",
+  PriorityHours = "PH",
 }
 
 const workaholicAddCommandDefaultValue = {
@@ -114,7 +117,7 @@ function sanitizeWorkaholicAdd(
 
 const prefix = "🐴";
 // https://www.ascii-code.com/character/%E2%90%9F
-const separator = "\u001f";
+const separator = " \u2043 ";
 export function formatWorkaholicAddCommand(
   raw: RawWorkaholicToAdd & { userId: APIUser["id"] },
 ) {
@@ -135,16 +138,21 @@ export function formatWorkaholicAddCommand(
   ].join(separator);
 }
 
+export type ValidWorkaholicMessage = NonNullable<
+  ReturnType<typeof parseMessageForSummary>
+>;
 export function parseMessageForSummary(message: APIMessage) {
-  const [_prefix, userMention, type, when, hDuration, what] = message
+  const [_prefix, userMention, type, when, hDuration, ...rWhat] = message
     .content
     .split(
       separator,
     );
 
+  const what = rWhat.join(separator);
+
   if (
     userMention == null || type == null || when == null || hDuration == null ||
-    what == null
+    what.trim() === ""
   ) {
     return null;
   }
@@ -162,7 +170,35 @@ export function parseMessageForSummary(message: APIMessage) {
   };
 }
 
-export function formatSummary(
+const rgxDateAndMonth = /[0-3]?\d \w{3}/;
+const rgxOt = /ot|overtime/i;
+const rgxDuration = /\d?\d\s?(jam|hours?)/i;
+export function isMessagePartialMatch(messageContent: APIMessage["content"]) {
+  const containsOt = rgxOt.test(messageContent);
+  if (rgxDuration.test(messageContent)) {
+    // if msg contains duration,
+    // no need to check date and month again
+    // because the regex overlap,
+    // date n month are looser version of duration.
+    // e.g. 2 jam is a matching date n month
+    // can be worked around using more specific month abbrev
+    // but not worth it.
+    return containsOt;
+  }
+  return containsOt && rgxDateAndMonth.test(messageContent);
+}
+
+export function makePartialMatchWarning(messages: Array<APIMessage>) {
+  if (messages.length === 0) {
+    return null;
+  }
+  return [
+    `I also found ${messages.length} message(s) that might worth some workaholic points:`,
+    ...messages.map((m) => `- ${m.content}`),
+  ].join("\n");
+}
+
+export function makeSummaryTable(
   {
     workaholicMessages,
     nicknameByUserId,
@@ -216,7 +252,7 @@ function getNicknameByUserId(
 
 export async function handleWorkaholicCommand(
   { interactionData, user, channelId, guildId }: CommandContext,
-) {
+): Promise<CommandHandlerResult> {
   const options = interactionData.options || [];
 
   const addCommand = options.find((
@@ -259,30 +295,82 @@ export async function handleWorkaholicCommand(
   );
 
   if (checkCommand) {
-    const [messages, guildMembers] = await Promise.all([
+    const [allMessages, guildMembers] = await Promise.all([
+      // TODO: Retrieve all messages in the specified month
+      // Right now this retrieves the last 50 only
       getMessagesFromChannel({ channelId }),
       // Hardcoded to 50 members for now
       getGuildMembers({ guildId, limit: 50 }),
     ]);
-    const rWorkaholicMessages = messages.filter((message) =>
-      message.content.startsWith(`${prefix}${separator}`)
+
+    // TODO: Consider making this aware of the user executor timezone
+    // Right now this uses GMT+0 and might show messages from different months
+    // at the start and the end of month depending on TZ.
+    const getYearMonthPart = (isoTimestamp: string) => isoTimestamp.slice(0, 7);
+    const thisMonthPart = getYearMonthPart(new Date().toISOString());
+
+    const thisMonthMessages = allMessages.filter((m) =>
+      getYearMonthPart(m.timestamp) === thisMonthPart
     );
 
-    const responseText = formatSummary(
-      {
-        workaholicMessages: mapNotNullish(
-          rWorkaholicMessages,
-          parseMessageForSummary,
-        ),
-        nicknameByUserId: getNicknameByUserId(guildMembers),
-      },
-    );
+    if (thisMonthMessages.length === 0) {
+      return {
+        responseText: "No messages for this month 😵‍💫",
+      };
+    }
+
+    const partialMatchMessages: Array<APIMessage> = [];
+    const matchingMessages: Array<ValidWorkaholicMessage> = [];
+
+    // With the assumption messages from discord are sorted with timestamp desc:
+    // Go through every messages in reverse order
+    // so the top most message is the oldest message
+    for (const channelMessage of thisMonthMessages.toReversed()) {
+      if (channelMessage.content.startsWith(`${prefix}${separator}`)) {
+        const validMessage = parseMessageForSummary(channelMessage);
+        if (validMessage) {
+          matchingMessages.push(validMessage);
+        } else {
+          partialMatchMessages.push(channelMessage);
+        }
+      } else {
+        if (
+          channelMessage.webhook_id == null && !channelMessage.author.bot &&
+          isMessagePartialMatch(channelMessage.content)
+        ) {
+          partialMatchMessages.push(channelMessage);
+        }
+      }
+    }
+
+    const summaryTable = matchingMessages.length > 0
+      ? makeSummaryTable(
+        {
+          workaholicMessages: matchingMessages,
+          nicknameByUserId: getNicknameByUserId(guildMembers),
+        },
+      )
+      : null;
+    const partialMatchWarning = makePartialMatchWarning(partialMatchMessages);
+
+    if (summaryTable == null) {
+      return {
+        responseText: partialMatchWarning != null
+          ? `No exact matches found but...`.concat("\n", partialMatchWarning)
+          : "No workaholic detected yet, keep working!",
+      };
+    }
+
+    const responseText = [summaryTable, partialMatchWarning].filter(
+      Boolean,
+    )
+      .join("\n");
 
     return { responseText };
   }
 
   return {
-    responseText: `Unknown subcommand!
-${JSON.stringify(interactionData, null, 2)}`,
+    responseText: `💣 Unhandled subcommand!
+raw data=${JSON.stringify(interactionData, null, 2)}`,
   };
 }
