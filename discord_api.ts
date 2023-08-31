@@ -21,6 +21,7 @@ const defaultAuthenticatedHeaders = {
   Authorization: `Bot ${config.DISCORD_BOT_TOKEN}`,
 };
 
+const repoUrl = "https://github.com/darcien/bernard-bot";
 export async function fetchAsBot(input: string, init?: RequestInit) {
   console.log("🤖 Fetching as bot...", {
     input,
@@ -31,6 +32,8 @@ export async function fetchAsBot(input: string, init?: RequestInit) {
   const result = await fetch(input, {
     ...init,
     headers: {
+      // https://discord.com/developers/docs/reference#user-agent
+      "User-Agent": `DiscordBot (${repoUrl})`,
       ...defaultAuthenticatedHeaders,
       ...init?.headers,
     },
