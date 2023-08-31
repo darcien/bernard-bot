@@ -1,9 +1,11 @@
 {
   "version": "2",
   "remote": {
-    "https://cdn.skypack.dev/-/http-cache-semantics@v4.1.0-5IkAyzxageW9utYlM9Kq/dist=es2019,mode=imports/optimized/http-cache-semantics.js": "abb90d8731ed016549017a010e198e5075e5ca5308bfe429b7acaa07c3fe7200",
+    "https://cdn.skypack.dev/-/http-cache-semantics@v4.1.1-N0bWdwKGKLbWpVco6TJA/dist=es2019,mode=imports/optimized/http-cache-semantics.js": "d2b8a8ddda629c7a915c269ecad2ba761cacad5c6e21bbf34381def053702294",
+    "https://cdn.skypack.dev/-/http-cache-semantics@v4.1.1-N0bWdwKGKLbWpVco6TJA/dist=es2019,mode=types/index.d.ts": "cab425b5559edac18327eb2c3c0f47e7e9f71b667290b7689faafd28aac69eae",
     "https://cdn.skypack.dev/-/tweetnacl@v1.0.3-G4yM3nQ8lnXXlGGQADqJ/dist=es2019,mode=imports/optimized/tweetnacl.js": "d26554516df57e5cb58954e90c633c8871b4e66016b9fe4e07a36db5430bc8c7",
-    "https://cdn.skypack.dev/http-cache-semantics?dts": "dc31b1d6078daceb7667ec025de2206541c4f1c8fe480836bbaf9f8f666f9880",
+    "https://cdn.skypack.dev/-/tweetnacl@v1.0.3-G4yM3nQ8lnXXlGGQADqJ/dist=es2019,mode=types/nacl.d.ts": "60592f5ae1b739c9607a99895d4a3ad5c865b16903e4180e50b256e360a4a104",
+    "https://cdn.skypack.dev/http-cache-semantics?dts": "351196d5e6d6b0cd41d8cfcc73f9a741532c8ac5ff1686a2c86d554a2a3dc993",
     "https://cdn.skypack.dev/tweetnacl@v1.0.3?dts": "6610aad2ac175c2d575995fc7de8ed552c2e5e05aef80ed8588cf3c6e2db61d7",
     "https://deno.land/std@0.118.0/_util/assert.ts": "2f868145a042a11d5ad0a3c748dcf580add8a0dbc0e876eaa0026303a5488f58",
     "https://deno.land/std@0.118.0/_util/os.ts": "dfb186cc4e968c770ab6cc3288bd65f4871be03b93beecae57d657232ecffcac",
@@ -163,12 +165,18 @@
     "https://deno.land/x/media_types@v2.11.1/db.ts": "1eac2b1b57195e41d7e40d7b236a3adeb93b4fa18084b4c9db49144fe685c78d",
     "https://deno.land/x/media_types@v2.11.1/mod.ts": "1be09ec3626332f9fe52a8a9ede852bb76d2207f84bec1f1b16c10555478008f",
     "https://deno.land/x/sift@0.6.0/mod.ts": "d156582201226616af9c27cf93ee06610fc907700dcc09802e3741d2b14042bd",
-    "https://esm.sh/markdown-table@3.0.3": "3f9f8b7dc8c99fa6b3539fccd08d6c653de6b0a93efbfbac279f32eff91b3b17",
-    "https://esm.sh/preact-render-to-string@5.2.4?target=deno": "5b34badac059831e3514940de31c0a7f55daba28e497f97af6b130277c2b0e60",
-    "https://esm.sh/preact@10.10.6?target=deno": "3797eacd827278d2601acc8c9da07da1df226113a5e0f5ff54055ffb9dcf4bf4",
-    "https://esm.sh/stable/preact@10.10.6/deno/preact.js": "e0d155b4926e5b1f4dce9b9efea9f8c65edb7587b3b7a4ebd5d339474cf61e20",
-    "https://esm.sh/stable/preact@10.11.3/deno/preact.js": "d17d6b3217ccb0352f68bbd47930aa25d260c1a544f45bcbcf4cd1ded9d630bb",
-    "https://esm.sh/v130/markdown-table@3.0.3/denonext/markdown-table.mjs": "1dd9cb2d2d95fc440cc10489ac77bf979c944e76070997d962e05f627f45df0e",
-    "https://esm.sh/v99/preact-render-to-string@5.2.4/deno/preact-render-to-string.js": "9ad4f16284c6c7e1b4d24e0f339b519c3807db3cc333ac1b5d3e2b1bff799d40"
+    "https://esm.sh/markdown-table@3.0.3": "e8c6d13b2f80b02b9dc8832f25eba21c3458b93c9943ffff0bffa6fe4363e655",
+    "https://esm.sh/preact-render-to-string@5.2.4?target=deno": "401b3a4fd690b9a86e7b2f4e38c8aa97c3b537de78cac3738775671107b9ee44",
+    "https://esm.sh/preact@10.10.6?target=deno": "1e29f08f3e8ad648c83062cbb69e040235a18441c8b2e58aac3d82b39393bba2",
+    "https://esm.sh/stable/preact@10.10.6/deno/preact.mjs": "8c7289f4add6fb4e6f9066a7f39b59e61254e32ed8204551b6499aed333921fb",
+    "https://esm.sh/stable/preact@10.17.0/deno/preact.mjs": "bcada2ee92939c08627eefd1d566ccca66158beb04b0befeae3cf76155d4a48d",
+    "https://esm.sh/v128/preact@10.10.6/src/index.d.ts": "d3e2e5125321d592d2458226f311de66411f2fa949e546cbaaefa533c4fb89e3",
+    "https://esm.sh/v128/preact@10.10.6/src/jsx.d.ts": "1bb7de31d64cc39b3b07613dc39bff42199ffec4b97ac9168a86f4747a3ec669",
+    "https://esm.sh/v128/preact@10.17.0/src/index.d.ts": "c79f909cebfc6f5c507c6b8d98e5a6f775c8b23c9c65fd2459244d38f7ae059b",
+    "https://esm.sh/v128/preact@10.17.0/src/jsx.d.ts": "d2ea4f85cc8bd6a67bcc9db042ce86591e9c525d0916521fdcf75e5fd1c63d0f",
+    "https://esm.sh/v131/markdown-table@3.0.3/denonext/markdown-table.mjs": "1dd9cb2d2d95fc440cc10489ac77bf979c944e76070997d962e05f627f45df0e",
+    "https://esm.sh/v131/markdown-table@3.0.3/index.d.ts": "d6fdaeb6f1e4e29d7827e30d743dfef5cb6c8bca4bc546001a3b3e751a2de06c",
+    "https://esm.sh/v131/preact-render-to-string@5.2.4/deno/preact-render-to-string.mjs": "a422ddf3a999170477c22d1e0ba5524d5b9a6bdd788ea6d8c77db511ddc9a276",
+    "https://esm.sh/v131/preact-render-to-string@5.2.4/src/index.d.ts": "c825cf9c6d0f5138acb05b88d17aa72f9e05bd69a8a07f754bdd78574dd328bc"
   }
 }
