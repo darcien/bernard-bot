@@ -44,10 +44,13 @@ export async function fetchAsBot(input: string, init?: RequestInit) {
 }
 
 export async function getMessagesFromChannel(
-  { channelId }: { channelId: string },
+  { channelId, limit = 100 }: { channelId: string; limit?: number },
 ) {
-  const url = makeDiscordApiUrl(
-    `/channels/${channelId}/messages`,
+  const url = addParamsToUrl(
+    makeDiscordApiUrl(
+      `/channels/${channelId}/messages`,
+    ),
+    { limit },
   );
 
   const res = await fetchAsBot(url);
