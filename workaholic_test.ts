@@ -107,6 +107,15 @@ Deno.test("parseMessageForSummary", () => {
 });
 
 Deno.test("makeSummaryTable", async (t) => {
+  const nicknameByUserId = new Map([
+    ["123", "Capybara"],
+    ["456", "Yagi"],
+    ["789", "Kaffu"],
+  ]);
+  const getNicknameByUserId = (userId: string) => {
+    return nicknameByUserId.get(userId);
+  };
+
   const summary = makeSummaryTable({
     workaholicMessages: [
       {
@@ -145,11 +154,7 @@ Deno.test("makeSummaryTable", async (t) => {
         userId: "789",
       },
     ],
-    nicknameByUserId: new Map([
-      ["123", "Capybara"],
-      ["456", "Yagi"],
-      ["789", "Kaffu"],
-    ]),
+    getNicknameByUserId,
   });
 
   await assertSnapshot(t, summary);

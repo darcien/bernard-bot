@@ -188,25 +188,32 @@ export function isMessagePartialMatch(messageContent: APIMessage["content"]) {
   return containsOt && rgxDateAndMonth.test(messageContent);
 }
 
-export function makePartialMatchWarning(messages: Array<APIMessage>) {
+export function makePartialMatchWarning({ messages, getNicknameByUserId }: {
+  messages: Array<APIMessage>;
+  getNicknameByUserId: ReturnType<typeof makeGetNicknameByUserIdFn>;
+}) {
   if (messages.length === 0) {
     return null;
   }
   return [
     `I also found ${messages.length} message(s) that might worth some workaholic points:`,
-    ...messages.map((m) => `- ${m.content}`),
+    ...messages.map((m) =>
+      `- ${
+        getNicknameByUserId(m.author.id) || `<@${m.author.id}>`
+      }, ${m.content}`
+    ),
   ].join("\n");
 }
 
 export function makeSummaryTable(
   {
     workaholicMessages,
-    nicknameByUserId,
+    getNicknameByUserId,
   }: {
     workaholicMessages: Array<
       NonNullable<ReturnType<typeof parseMessageForSummary>>
     >;
-    nicknameByUserId: ReturnType<typeof getNicknameByUserId>;
+    getNicknameByUserId: ReturnType<typeof makeGetNicknameByUserIdFn>;
   },
 ) {
   const header = [
@@ -221,7 +228,7 @@ export function makeSummaryTable(
       header,
       // TODO: add sorting/grouping
       ...workaholicMessages.map((m) => [
-        nicknameByUserId.get(m.userId) || `<@${m.userId}>`,
+        getNicknameByUserId(m.userId) || `<@${m.userId}>`,
         m.when,
         m.duration,
         m.what,
@@ -236,7 +243,7 @@ export function makeSummaryTable(
   ].join("\n");
 }
 
-function getNicknameByUserId(
+function makeGetNicknameByUserIdFn(
   members: Awaited<ReturnType<typeof getGuildMembers>>,
 ) {
   const nicknameByUserId = new Map<string, string>();
@@ -247,7 +254,9 @@ function getNicknameByUserId(
     }
   }
 
-  return nicknameByUserId;
+  return function getNicknameByUserId(userId: string) {
+    return nicknameByUserId.get(userId);
+  };
 }
 
 export async function handleWorkaholicCommand(
@@ -343,15 +352,20 @@ export async function handleWorkaholicCommand(
       }
     }
 
+    const getNicknameByUserId = makeGetNicknameByUserIdFn(guildMembers);
+
     const summaryTable = matchingMessages.length > 0
       ? makeSummaryTable(
         {
           workaholicMessages: matchingMessages,
-          nicknameByUserId: getNicknameByUserId(guildMembers),
+          getNicknameByUserId,
         },
       )
       : null;
-    const partialMatchWarning = makePartialMatchWarning(partialMatchMessages);
+    const partialMatchWarning = makePartialMatchWarning({
+      messages: partialMatchMessages,
+      getNicknameByUserId,
+    });
 
     if (summaryTable == null) {
       return {
