@@ -306,7 +306,7 @@ export async function handleWorkaholicCommand(
   if (checkCommand) {
     const [allMessages, guildMembers] = await Promise.all([
       // TODO: Retrieve all messages in the specified month
-      // Right now this retrieves the last 50 only
+      // Right now this retrieves the last 100 only
       getMessagesFromChannel({ channelId }),
       // Hardcoded to 50 members for now
       getGuildMembers({ guildId, limit: 50 }),

@@ -1,6 +1,6 @@
 set dotenv-load
 
-default-permission := "--allow-read=./ --allow-env --allow-net=discord.com"
+default-permission := "--allow-read=./ --allow-env --allow-net='0.0.0.0:8000,discord.com'"
 
 # List all available targets if just is executed with no arguments
 default:
@@ -13,6 +13,9 @@ install:
   curl -fsSL https://deno.land/x/install/install.sh | sh
   # Install deployctl for deployment - https://github.com/denoland/deployctl#install
   deno install --allow-read --allow-write --allow-env --allow-net --allow-run --no-check -r -f https://deno.land/x/deploy/deployctl.ts
+
+dev:
+  deno run {{default-permission}} --watch ./mod.ts
 
 # Register all commands to Discord application
 register:

@@ -3,11 +3,22 @@ import {
   APIInteraction,
   InteractionType,
   json,
+  loadSync,
   serve,
   sign,
   validateRequest,
 } from "./deps.ts";
 import { handleCommands } from "./commands.ts";
+
+// Local uses .env file
+const config = loadSync();
+
+const PUBLIC_KEY = Deno.env.get("DISCORD_PUBLIC_KEY") ||
+  config.DISCORD_PUBLIC_KEY;
+
+if (PUBLIC_KEY == null) {
+  throw new Error("Missing DISCORD_PUBLIC_KEY");
+}
 
 // For all requests to "/" endpoint, we want to invoke home() handler.
 serve({
@@ -121,7 +132,6 @@ Stack: ${error.stack || "No stack trace"}`,
 async function verifySignature(
   request: Request,
 ): Promise<{ valid: boolean; body: string }> {
-  const PUBLIC_KEY = Deno.env.get("DISCORD_PUBLIC_KEY")!;
   // Discord sends these headers with every request.
   const signature = request.headers.get("X-Signature-Ed25519")!;
   const timestamp = request.headers.get("X-Signature-Timestamp")!;
@@ -129,7 +139,7 @@ async function verifySignature(
   const valid = sign.detached.verify(
     new TextEncoder().encode(timestamp + body),
     hexToUint8Array(signature),
-    hexToUint8Array(PUBLIC_KEY),
+    hexToUint8Array(PUBLIC_KEY!),
   );
 
   return { valid, body };
