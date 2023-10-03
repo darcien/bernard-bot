@@ -52,11 +52,20 @@ export function makeReplyAsMarkdownAttachment(
   const attachmentId = 0;
   const type = "text/markdown";
 
+  let fileContent = content;
+  if (fileContent.includes("```markdown")) {
+    // This is a temporary hack to remove useless
+    // backtick formatting since we're sending the content
+    // as a markdown file anyway.
+    fileContent = fileContent.replace(/```markdown\n/g, "");
+    fileContent = fileContent.replace(/```\n/g, "\n");
+  }
+
   // While using Blob works type-wise and is logged
   // exactly the same as using File when using res.text(),
   // it does not work when responding to Discord API.
   const file = new File(
-    [new Blob([content], { type })],
+    [new Blob([fileContent], { type })],
     attachmentName,
     { type },
   );
