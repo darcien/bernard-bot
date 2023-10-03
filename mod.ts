@@ -1,6 +1,8 @@
 import {
   APIChatInputApplicationCommandInteractionData,
   APIInteraction,
+  APIInteractionResponseChannelMessageWithSource,
+  InteractionResponseType,
   InteractionType,
   json,
   loadSync,
@@ -9,6 +11,7 @@ import {
   validateRequest,
 } from "./deps.ts";
 import { handleCommands } from "./commands.ts";
+import { makeWebhookResponseFromHandlerResult } from "./webhook_response.ts";
 
 // Local uses .env file
 const config = loadSync();
@@ -62,7 +65,7 @@ async function home(request: Request) {
   // Type 1 in a request implies a Ping interaction.
   if (type === InteractionType.Ping) {
     return json({
-      type: 1, // Type 1 in a response is a Pong interaction response type.
+      type: InteractionResponseType.Pong,
     });
   }
 
@@ -99,14 +102,7 @@ async function home(request: Request) {
         return json({ error: "Unknown command" }, { status: 400 });
       }
 
-      return json({
-        // Type 4 responds with the below message retaining the user's
-        // input at the top.
-        type: 4,
-        data: {
-          content: handlerOutput.responseText,
-        },
-      });
+      return makeWebhookResponseFromHandlerResult(handlerOutput);
     } catch (rError: unknown) {
       const error = rError instanceof Error
         ? rError
@@ -119,7 +115,7 @@ async function home(request: Request) {
 Error: ${error.message}
 Stack: ${error.stack || "No stack trace"}`,
         },
-      });
+      } as APIInteractionResponseChannelMessageWithSource);
     }
   }
 
