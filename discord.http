@@ -1,0 +1,33 @@
+@token = {{$dotenv DISCORD_BOT_TOKEN}}
+
+@authorization = Bot {{token}}
+
+GET https://discord.com/api/v10/channels/1047121630150791228/messages
+Content-Type: application/json
+Authorization: {{authorization}}
+
+###
+
+
+POST https://discord.com/api/v10/channels/1047121630150791228/messages
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+Authorization: {{authorization}}
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="payload_json"
+Content-Type: application/json
+
+{
+  "content": "Hello, World!",
+  "attachments": [{
+      "id": 0,
+      "description": "My cool attachment",
+      "filename": "mytext.md"
+  }]
+}
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="files[0]"; filename="mytext.md"
+Content-Type: text/markdown
+
+< ./test.md
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
