@@ -37,6 +37,10 @@ enum WorkaholicCheckCommandOption {
   When = "when",
 }
 
+enum DebugCommandOption {
+  NoMonthMatching = "no-month-matching",
+}
+
 export const workaholicCommand = makeCommand({
   name: "workaholic",
   description: "Add or check workaholic points",
@@ -327,10 +331,14 @@ export async function handleWorkaholicCommand(
     // be to iterate through the messages until we found message
     // with suitable timestamp, which might take multiple API calls
     // depending on the when options and channel activity.
-    // const checkOptions = checkCommand.options || [];
-    // const whenOption = checkOptions.find((option) =>
-    //   option.name === WorkaholicCheckCommandOption.When
-    // );
+    const checkOptions = checkCommand.options || [];
+    const whenOption = checkOptions.find((option) =>
+      option.name === WorkaholicCheckCommandOption.When
+    );
+
+    const doMonthMatching = !String(whenOption?.value ?? "").includes(
+      DebugCommandOption.NoMonthMatching,
+    );
 
     const [allMessages, guildMembers] = await Promise.all([
       // TODO: Retrieve all messages in the specified month
@@ -347,7 +355,11 @@ export async function handleWorkaholicCommand(
     const thisMonthPart = getYearMonthPart(new Date().toISOString());
 
     const thisMonthMessages = allMessages.filter((m) =>
-      getYearMonthPart(m.timestamp) === thisMonthPart
+      doMonthMatching
+        ? getYearMonthPart(m.timestamp) === thisMonthPart
+        // Don't filter out messages by month
+        // when month matching is disabled.
+        : true
     );
 
     if (thisMonthMessages.length === 0) {
