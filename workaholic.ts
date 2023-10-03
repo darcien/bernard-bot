@@ -33,6 +33,10 @@ const workaholicAddCommandDefaultValue = {
   [WorkaholicAddCommandOption.Type]: WorkaholicType.Overtime,
 };
 
+enum WorkaholicCheckCommandOption {
+  When = "when",
+}
+
 export const workaholicCommand = makeCommand({
   name: "workaholic",
   description: "Add or check workaholic points",
@@ -84,7 +88,7 @@ export const workaholicCommand = makeCommand({
       type: ApplicationCommandOptionType.Subcommand,
       options: [
         {
-          name: WorkaholicAddCommandOption.When,
+          name: WorkaholicCheckCommandOption.When,
           description: `For when?`,
           type: ApplicationCommandOptionType.String,
           required: false,
@@ -205,6 +209,10 @@ export function makePartialMatchWarning({ messages, getNicknameByUserId }: {
   ].join("\n");
 }
 
+enum WorkaholicResponseMessage {
+  NoMessages = "No workaholic detected yet, keep working!",
+}
+
 export function makeSummaryTable(
   {
     workaholicMessages,
@@ -304,6 +312,19 @@ export async function handleWorkaholicCommand(
   );
 
   if (checkCommand) {
+    // It might be impossible to implement the when option efficiently
+    // because the API does not provide:
+    // - search API for messages
+    // - before or after using timestamp instead of snowflake id
+    // The bruteforce way to implement this would
+    // be to iterate through the messages until we found message
+    // with suitable timestamp, which might take multiple API calls
+    // depending on the when options and channel activity.
+    // const checkOptions = checkCommand.options || [];
+    // const whenOption = checkOptions.find((option) =>
+    //   option.name === WorkaholicCheckCommandOption.When
+    // );
+
     const [allMessages, guildMembers] = await Promise.all([
       // TODO: Retrieve all messages in the specified month
       // Right now this retrieves the last 100 only
@@ -324,7 +345,7 @@ export async function handleWorkaholicCommand(
 
     if (thisMonthMessages.length === 0) {
       return {
-        responseText: "No messages for this month 😵‍💫",
+        responseText: WorkaholicResponseMessage.NoMessages,
       };
     }
 
@@ -371,7 +392,7 @@ export async function handleWorkaholicCommand(
       return {
         responseText: partialMatchWarning != null
           ? `No exact matches found but...`.concat("\n", partialMatchWarning)
-          : "No workaholic detected yet, keep working!",
+          : WorkaholicResponseMessage.NoMessages,
       };
     }
 
