@@ -178,9 +178,16 @@ const rgxDateAndMonth = /[0-3]?\d \w{3}/;
 const rgxOt = /ot|overtime/i;
 const rgxDuration = /\d?\d\s?(jam|hours?)/i;
 export function isMessagePartialMatch(messageContent: APIMessage["content"]) {
+  // If message contains code block,
+  // assume it's a big unrelated msg and unlikely to be
+  // partial match.
+  if (messageContent.includes("```")) {
+    return false;
+  }
+
   const containsOt = rgxOt.test(messageContent);
   if (rgxDuration.test(messageContent)) {
-    // if msg contains duration,
+    // If msg contains duration,
     // no need to check date and month again
     // because the regex overlap,
     // date n month are looser version of duration.

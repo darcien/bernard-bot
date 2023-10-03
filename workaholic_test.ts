@@ -46,6 +46,10 @@ Deno.test("isMessagePartialMatch", () => {
     isMessagePartialMatch("23 aug"),
     false,
   );
+  assertEquals(
+    isMessagePartialMatch("```markdown```"),
+    false,
+  );
 });
 
 Deno.test("formatWorkaholicAddCommand", () => {
