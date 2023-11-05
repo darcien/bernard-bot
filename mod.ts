@@ -26,6 +26,7 @@ if (PUBLIC_KEY == null) {
 // For all requests to "/" endpoint, we want to invoke home() handler.
 serve({
   "/": home,
+  "/ping": () => json({ message: "Pong!" }),
 });
 
 // The main logic of the Discord Slash Command is defined in this function.
