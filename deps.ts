@@ -19,3 +19,14 @@ export { markdownTable } from "https://esm.sh/markdown-table@3.0.3";
 export { loadSync } from "https://deno.land/std@0.197.0/dotenv/mod.ts";
 
 export { mapNotNullish } from "https://deno.land/std@0.197.0/collections/map_not_nullish.ts";
+
+// Importing from CDN resulting in empty object :(
+// ```
+// > import x from "https://esm.sh/e25n@1.1.0";
+// undefined
+// > x
+// {}
+// ```
+// @deno-types="./e25n.d.ts"
+export { default as e25n } from "https://esm.sh/e25n@1.1.0";
+// export { default as e25n } from "https://cdn.skypack.dev/e25n@1.1.0";

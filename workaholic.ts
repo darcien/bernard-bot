@@ -420,8 +420,6 @@ export async function handleWorkaholicCommand(
     )
       .join("\n");
 
-    // Discord might reject the response if the response length > 2000
-    // TODO: Upload response as file to avoid rejection
     return { responseText };
   }
 
