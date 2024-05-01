@@ -64,6 +64,18 @@ Deno.test("formatWorkaholicAddCommand", () => {
     formatted,
     "🐴 ⁃ <@123> ⁃ OT ⁃ 2021-01-01 ⁃ 7h ⁃ my lorem ipsum work",
   );
+
+  const phFormatted = formatWorkaholicAddCommand({
+    duration: 2,
+    type: WorkaholicType.PriorityHours,
+    userId: "456",
+    what: "my lorem ipsum work",
+    when: "today",
+  });
+  assertEquals(
+    phFormatted,
+    "🐴 ⁃ <@456> ⁃ PH ⁃ today ⁃ 2h ⁃ my lorem ipsum work",
+  );
 });
 
 Deno.test("parseMessageForSummary", () => {

@@ -117,9 +117,12 @@ function sanitizeWorkaholicAdd(
     what: String(what),
     when: String(when),
     duration: typeof duration === "number" ? duration : 0,
-    type: (sType in WorkaholicType ? sType : workaholicAddCommandDefaultValue[
-      WorkaholicAddCommandOption.Type
-    ]) as WorkaholicType,
+    type:
+      (Object.values(WorkaholicType).includes(sType as WorkaholicType)
+        ? sType
+        : workaholicAddCommandDefaultValue[
+          WorkaholicAddCommandOption.Type
+        ]),
   };
 }
 

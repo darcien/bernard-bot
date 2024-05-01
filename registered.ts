@@ -19,7 +19,9 @@ async function getAllCommands() {
   });
 
   const res = await result.json();
-  console.log(res);
+  console.dir(res, {
+    depth: Infinity,
+  });
   const commandCount = "length" in res && typeof res.length === "number"
     ? res.length
     : null;
