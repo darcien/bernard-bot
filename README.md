@@ -12,7 +12,7 @@ It depends, but generally no.
 
 ## Why?
 
-Because I can.
+For fun.
 
 ## Who is this Bernard?
 
