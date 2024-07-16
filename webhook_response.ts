@@ -57,8 +57,8 @@ export function makeReplyAsMarkdownAttachment(
     // This is a temporary hack to remove useless
     // backtick formatting since we're sending the content
     // as a markdown file anyway.
-    fileContent = fileContent.replace(/```markdown\n/g, "");
-    fileContent = fileContent.replace(/```\n/g, "\n");
+    fileContent = fileContent.replace(/^```markdown$/gm, "");
+    fileContent = fileContent.replace(/^```$/gm, "\n");
   }
 
   // While using Blob works type-wise and is logged
