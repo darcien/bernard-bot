@@ -1,6 +1,7 @@
 import {
   APIChatInputApplicationCommandInteractionData,
   APIUser,
+  InteractionResponseType,
   RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from "./deps.ts";
 
@@ -16,12 +17,13 @@ export type CommandContext = {
   channelId: string;
   guildId: string;
   interactionId: string;
-  continuationToken: string;
+  interactionToken: string;
   db: Deno.Kv;
 };
 
 export type CommandHandlerResult = {
   responseText: string;
+  responseType?: InteractionResponseType;
 };
 
 export type CommandHandler = (

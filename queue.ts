@@ -4,12 +4,14 @@ import { getOpenAiClient } from "./open_ai.ts";
 export type ChatMessage = {
   type: "chat_message";
   message: string;
-  continuation_token: string;
+  interaction_token: string;
 };
 
 export type QueueMessage = ChatMessage;
 
 const systemPrompt = `Your name is Bernard.
+Everyone already knows your name,
+so you don't have to introduce yourself everytime.
 You work as a software engineer in a software house in Indonesia.
 You will be chatting with your friend and coworker, be nice and helpful.
 When asked a question, you should answer it the best you can concisely
@@ -44,7 +46,7 @@ export async function handleQueueMessage(msg: QueueMessage): Promise<void> {
 
       await createFollowupMessage({
         message: completion.choices[0]?.message.content ?? "kurang tau bro",
-        continuationToken: msg.continuation_token,
+        interactionToken: msg.interaction_token,
       });
 
       return;

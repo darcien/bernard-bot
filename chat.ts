@@ -1,5 +1,12 @@
-import { CommandContext, makeCommand } from "./command_utils.ts";
-import { ApplicationCommandOptionType } from "./deps.ts";
+import {
+  CommandContext,
+  CommandHandlerResult,
+  makeCommand,
+} from "./command_utils.ts";
+import {
+  ApplicationCommandOptionType,
+  InteractionResponseType,
+} from "./deps.ts";
 import { ChatMessage } from "./queue.ts";
 
 enum ChatCommandOption {
@@ -22,11 +29,11 @@ export const chatCommand = makeCommand({
 
 export async function handleChatCommand(
   {
-    continuationToken,
+    interactionToken,
     interactionData,
     db,
   }: CommandContext,
-) {
+): Promise<CommandHandlerResult> {
   const options = interactionData.options || [];
 
   const messageOption = options.find(
@@ -41,11 +48,15 @@ export async function handleChatCommand(
     {
       type: "chat_message",
       message,
-      continuation_token: continuationToken,
+      interaction_token: interactionToken,
     } satisfies ChatMessage,
   );
 
   return {
-    responseText: "bentar bro, mikir dulu",
+    responseType: InteractionResponseType.DeferredChannelMessageWithSource,
+    // With deferred response,
+    // user see loading state like "Bernard is thinking...",
+    // so the response text doesn't matter here.
+    responseText: "Bernard is thinking...",
   };
 }

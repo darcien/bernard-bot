@@ -105,7 +105,7 @@ async function home(request: Request) {
     try {
       const handlerOutput = await handleCommands({
         interactionId: id,
-        continuationToken: token,
+        interactionToken: token,
         interactionData,
         user,
         channelId: channel.id,

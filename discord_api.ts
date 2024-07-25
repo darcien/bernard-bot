@@ -3,6 +3,8 @@ import {
   RESTGetAPIChannelMessagesResult,
   RESTGetAPIGuildMembersQuery,
   RESTGetAPIGuildMembersResult,
+  RESTPatchAPIInteractionOriginalResponseJSONBody,
+  RESTPatchAPIInteractionOriginalResponseResult,
   RESTPostAPIInteractionFollowupJSONBody,
   RESTPostAPIInteractionFollowupResult,
 } from "./deps.ts";
@@ -108,10 +110,10 @@ export async function getGuildMembers(
 
 export async function createFollowupMessage({
   message,
-  continuationToken,
-}: { message: string; continuationToken: string }) {
+  interactionToken,
+}: { message: string; interactionToken: string }) {
   const url = makeDiscordApiUrl(
-    `/webhooks/${config.DISCORD_APPLICATION_ID}/${continuationToken}`,
+    `/webhooks/${config.DISCORD_APPLICATION_ID}/${interactionToken}`,
   );
 
   const body: RESTPostAPIInteractionFollowupJSONBody = {
@@ -130,4 +132,30 @@ export async function createFollowupMessage({
   const json = await res.json();
 
   return json as RESTPostAPIInteractionFollowupResult;
+}
+
+export async function editOriginalInteractionResponse({
+  message,
+  interactionToken,
+}: { message: string; interactionToken: string }) {
+  const url = makeDiscordApiUrl(
+    `/webhooks/${config.DISCORD_APPLICATION_ID}/${interactionToken}/messages/@original`,
+  );
+
+  const body: RESTPatchAPIInteractionOriginalResponseJSONBody = {
+    content: message.slice(0, 2000),
+  };
+
+  const res = await fetchAsBot(url, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Bad response for createFollowupMessage: ${res.status}`);
+  }
+
+  const json = await res.json();
+
+  return json as RESTPatchAPIInteractionOriginalResponseResult;
 }

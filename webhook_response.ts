@@ -42,8 +42,9 @@ export function multipart(
 // Hello world!
 // ------2231178723606858477463687254--
 export function makeReplyAsMarkdownAttachment(
-  { content }: {
+  { content, interactionResponseType }: {
     content: string;
+    interactionResponseType: InteractionResponseType;
   },
 ) {
   const formData = new FormData();
@@ -74,7 +75,7 @@ export function makeReplyAsMarkdownAttachment(
     "payload_json",
     JSON.stringify(
       {
-        type: InteractionResponseType.ChannelMessageWithSource,
+        type: interactionResponseType,
         data: {
           // Can add other JSON fields here
           // content: "hello mars",
@@ -96,16 +97,22 @@ const ENABLE_MULTIPART = true;
 
 const DISCORD_MESSAGE_MAX_LENGTH = 2000;
 export function makeWebhookResponseFromHandlerResult(
-  { responseText }: CommandHandlerResult,
+  { responseText, responseType }: CommandHandlerResult,
 ) {
   // TODO: Abstractize HTTP response command handler logic
   let content = responseText;
+
+  // Type 4 responds with the below message retaining the user's
+  // input at the top.
+  const interactionResponseType = responseType ??
+    InteractionResponseType.ChannelMessageWithSource;
 
   // This length check probably will fail on weird unicode chars
   // because it's not doing graphemes counting.
   if (ENABLE_MULTIPART && content.length > DISCORD_MESSAGE_MAX_LENGTH) {
     return multipart(makeReplyAsMarkdownAttachment({
       content,
+      interactionResponseType,
     }));
   }
 
@@ -115,9 +122,7 @@ export function makeWebhookResponseFromHandlerResult(
   }
 
   return json({
-    // Type 4 responds with the below message retaining the user's
-    // input at the top.
-    type: InteractionResponseType.ChannelMessageWithSource,
+    type: interactionResponseType,
     data: {
       content,
     },
