@@ -1,5 +1,21 @@
 {
   "compilerOptions": {
     "noUncheckedIndexedAccess": true
+  },
+  "deploy": {
+    "project": "2b6283b4-7cb2-4391-8802-019389d42246",
+    "exclude": [
+      "**/node_modules",
+      "**/*_test.ts"
+    ],
+    "include": [
+      "**/*.ts",
+      // Including .env is not ideal,
+      // since now deployed env also use same .env with local.
+      // Need to refactor code to avoid using loadSync()
+      // directly, and instead use Deno.env.get().
+      ".env"
+    ],
+    "entrypoint": "mod.ts"
   }
 }

@@ -31,11 +31,10 @@ delete-registered commandId:
 
 # Deploy the slash commands request handler to Deno Deploy
 deploy:
-  # Make sure $DISCORD_PUBLIC_KEY is set in the deployed env
-  deployctl deploy --project=$DENO_DEPLOY_PROJECT_NAME ./mod.ts --token=$DENO_DEPLOY_TOKEN
+  deployctl deploy --token=$DENO_DEPLOY_TOKEN
 
 deploy-prod:
-  deployctl deploy --project=$DENO_DEPLOY_PROJECT_NAME ./mod.ts --token=$DENO_DEPLOY_TOKEN --prod
+  deployctl deploy --token=$DENO_DEPLOY_TOKEN --prod --save-config
 
 test:
   deno test {{default-permission}}
