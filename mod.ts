@@ -1,3 +1,4 @@
+/// <reference lib="deno.unstable" />
 import {
   APIChatInputApplicationCommandInteractionData,
   APIInteraction,
@@ -12,14 +13,12 @@ import {
 } from "./deps.ts";
 import { handleCommands } from "./commands.ts";
 import { makeWebhookResponseFromHandlerResult } from "./webhook_response.ts";
+import { handleQueueMessage } from "./queue.ts";
 
 // Local uses .env file
 const config = loadSync();
 
-const PUBLIC_KEY = Deno.env.get("DISCORD_PUBLIC_KEY") ||
-  config.DISCORD_PUBLIC_KEY;
-
-if (PUBLIC_KEY == null) {
+if (config.DISCORD_PUBLIC_KEY == null) {
   throw new Error("Missing DISCORD_PUBLIC_KEY");
 }
 
@@ -28,6 +27,10 @@ serve({
   "/": home,
   "/ping": () => json({ message: "Pong!" }),
 });
+
+const db = await Deno.openKv();
+
+db.listenQueue(handleQueueMessage);
 
 // The main logic of the Discord Slash Command is defined in this function.
 async function home(request: Request) {
@@ -57,7 +60,15 @@ async function home(request: Request) {
     );
   }
 
-  const { type = 0, data = { options: [] }, member, channel, guild_id } = JSON
+  const {
+    type = 0,
+    data = { options: [] },
+    member,
+    channel,
+    guild_id,
+    id,
+    token,
+  } = JSON
     .parse(
       body,
     ) as APIInteraction;
@@ -93,10 +104,13 @@ async function home(request: Request) {
 
     try {
       const handlerOutput = await handleCommands({
+        interactionId: id,
+        continuationToken: token,
         interactionData,
         user,
         channelId: channel.id,
         guildId: guild_id,
+        db,
       });
 
       if (handlerOutput == null) {
@@ -136,7 +150,7 @@ async function verifySignature(
   const valid = sign.detached.verify(
     new TextEncoder().encode(timestamp + body),
     hexToUint8Array(signature),
-    hexToUint8Array(PUBLIC_KEY!),
+    hexToUint8Array(config.DISCORD_PUBLIC_KEY!),
   );
 
   return { valid, body };

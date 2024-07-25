@@ -16,9 +16,9 @@ export * from "https://deno.land/x/discord_api_types@0.37.51/v10.ts";
 
 export { markdownTable } from "https://esm.sh/markdown-table@3.0.3";
 
-export { loadSync } from "https://deno.land/std@0.197.0/dotenv/mod.ts";
+export { loadSync } from "https://deno.land/std@0.224.0/dotenv/mod.ts";
 
-export { mapNotNullish } from "https://deno.land/std@0.197.0/collections/map_not_nullish.ts";
+export { mapNotNullish } from "https://deno.land/std@0.224.0/collections/map_not_nullish.ts";
 
 // Importing from CDN resulting in empty object :(
 // ```
@@ -30,3 +30,5 @@ export { mapNotNullish } from "https://deno.land/std@0.197.0/collections/map_not
 // @deno-types="./e25n.d.ts"
 export { default as e25n } from "https://esm.sh/e25n@1.1.0";
 // export { default as e25n } from "https://cdn.skypack.dev/e25n@1.1.0";
+
+export { default as OpenAI } from "https://deno.land/x/openai@v4.53.0/mod.ts";

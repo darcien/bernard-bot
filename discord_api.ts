@@ -3,6 +3,8 @@ import {
   RESTGetAPIChannelMessagesResult,
   RESTGetAPIGuildMembersQuery,
   RESTGetAPIGuildMembersResult,
+  RESTPostAPIInteractionFollowupJSONBody,
+  RESTPostAPIInteractionFollowupResult,
 } from "./deps.ts";
 
 const config = loadSync();
@@ -102,4 +104,30 @@ export async function getGuildMembers(
   return Array.from(
     await res.json(),
   ) as RESTGetAPIGuildMembersResult;
+}
+
+export async function createFollowupMessage({
+  message,
+  continuationToken,
+}: { message: string; continuationToken: string }) {
+  const url = makeDiscordApiUrl(
+    `/webhooks/${config.DISCORD_APPLICATION_ID}/${continuationToken}`,
+  );
+
+  const body: RESTPostAPIInteractionFollowupJSONBody = {
+    content: message.slice(0, 2000),
+  };
+
+  const res = await fetchAsBot(url, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Bad response for createFollowupMessage: ${res.status}`);
+  }
+
+  const json = await res.json();
+
+  return json as RESTPostAPIInteractionFollowupResult;
 }

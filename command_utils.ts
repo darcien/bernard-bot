@@ -15,11 +15,15 @@ export type CommandContext = {
   user: APIUser;
   channelId: string;
   guildId: string;
+  interactionId: string;
+  continuationToken: string;
+  db: Deno.Kv;
 };
 
 export type CommandHandlerResult = {
   responseText: string;
 };
+
 export type CommandHandler = (
   context: CommandContext,
 ) => Promise<CommandHandlerResult> | CommandHandlerResult;
