@@ -9,6 +9,7 @@
       "**/*_test.ts"
     ],
     "include": [
+      "deno.jsonc",
       "**/*.ts",
       // Including .env is not ideal,
       // since now deployed env also use same .env with local.
