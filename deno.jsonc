@@ -19,7 +19,7 @@
     "entrypoint": "mod.ts"
   },
   "imports": {
-    "$discord-api-types": "https://deno.land/x/discord_api_types@0.37.51/v10.ts",
+    "$discord-api-types": "https://deno.land/x/discord_api_types@0.37.93/v10.ts",
     "$markdown-table": "https://esm.sh/markdown-table@3.0.3",
     "$openai": "https://deno.land/x/openai@v4.53.0/mod.ts",
     "$sift": "https://deno.land/x/sift@0.6.0/mod.ts",
