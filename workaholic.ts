@@ -34,6 +34,7 @@ const workaholicAddCommandDefaultValue = {
 };
 
 enum WorkaholicCheckCommandOption {
+  Who = "who",
   When = "when",
 }
 
@@ -52,25 +53,27 @@ export const workaholicCommand = makeCommand({
       options: [
         {
           name: WorkaholicAddCommandOption.What,
-          description: `What did you do?`,
+          description: "What did you do?",
           type: ApplicationCommandOptionType.String,
           required: true,
         },
         {
           name: WorkaholicAddCommandOption.When,
-          description: `When did you do it?`,
+          description: "When did you do it?",
           type: ApplicationCommandOptionType.String,
           required: true,
         },
         {
           name: WorkaholicAddCommandOption.Duration,
-          description: `How long did you do it?`,
+          description: "How long did you do it (in hours)?",
           type: ApplicationCommandOptionType.Integer,
           required: true,
         },
         {
           name: WorkaholicAddCommandOption.Type,
-          description: `What's the workaholic type?`,
+          description: `What's the workaholic type? Default to ${
+            workaholicAddCommandDefaultValue[WorkaholicAddCommandOption.Type]
+          }`,
           type: ApplicationCommandOptionType.String,
           required: false,
           choices: [
@@ -92,8 +95,14 @@ export const workaholicCommand = makeCommand({
       type: ApplicationCommandOptionType.Subcommand,
       options: [
         {
+          name: WorkaholicCheckCommandOption.Who,
+          description: "For who? Default to everyone.",
+          type: ApplicationCommandOptionType.User,
+          required: false,
+        },
+        {
           name: WorkaholicCheckCommandOption.When,
-          description: `For when?`,
+          description: "(NOT IMPLEMENTED) For when? Default to current month.",
           type: ApplicationCommandOptionType.String,
           required: false,
         },
@@ -126,6 +135,10 @@ function sanitizeWorkaholicAdd(
   };
 }
 
+function formatUserIdForDiscord(userId: string) {
+  return `<@${userId}>`;
+}
+
 const prefix = "🐴";
 // https://www.ascii-code.com/character/%E2%90%9F
 const separator = " \u2043 ";
@@ -141,7 +154,7 @@ export function formatWorkaholicAddCommand(
   return [
     prefix,
     // Mention the user sending the command
-    `<@${raw.userId}>`,
+    formatUserIdForDiscord(raw.userId),
     type,
     when,
     `${duration}h`,
@@ -217,7 +230,7 @@ export function makePartialMatchWarning({ messages, getNicknameByUserId }: {
     `I also found ${messages.length} message(s) that might worth some workaholic points:`,
     ...messages.map((m) =>
       `- ${
-        getNicknameByUserId(m.author.id) || `<@${m.author.id}>`
+        getNicknameByUserId(m.author.id) || formatUserIdForDiscord(m.author.id)
       }, ${m.content}`
     ),
   ].join("\n");
@@ -250,7 +263,7 @@ export function makeSummaryTable(
       header,
       // TODO: add sorting/grouping
       ...workaholicMessages.map((m) => [
-        getNicknameByUserId(m.userId) || `<@${m.userId}>`,
+        getNicknameByUserId(m.userId) || formatUserIdForDiscord(m.userId),
         m.when,
         m.duration,
         m.what,
@@ -343,6 +356,14 @@ export async function handleWorkaholicCommand(
       DebugCommandOption.NoMonthMatching,
     );
 
+    const whoOption = checkOptions.find((option) =>
+      option.name === WorkaholicCheckCommandOption.Who
+    );
+
+    const who = whoOption?.type === ApplicationCommandOptionType.User
+      ? whoOption.value
+      : null;
+
     const [allMessages, guildMembers] = await Promise.all([
       // TODO: Retrieve all messages in the specified month
       // Right now this retrieves the last 100 only
@@ -371,22 +392,30 @@ export async function handleWorkaholicCommand(
       };
     }
 
+    const matchingUserMessages = thisMonthMessages.filter((m) =>
+      who == null ? true : m.mentions.find((user) => user.id === who) != null
+    );
+
+    // Only enable partial matching when checking for everyone.
+    const enablePartialMatching = who == null;
+
     const partialMatchMessages: Array<APIMessage> = [];
     const matchingMessages: Array<ValidWorkaholicMessage> = [];
 
     // With the assumption messages from discord are sorted with timestamp desc:
     // Go through every messages in reverse order
     // so the top most message is the oldest message
-    for (const channelMessage of thisMonthMessages.toReversed()) {
+    for (const channelMessage of matchingUserMessages.toReversed()) {
       if (channelMessage.content.startsWith(`${prefix}${separator}`)) {
         const validMessage = parseMessageForSummary(channelMessage);
         if (validMessage) {
           matchingMessages.push(validMessage);
-        } else {
+        } else if (enablePartialMatching) {
           partialMatchMessages.push(channelMessage);
         }
       } else {
         if (
+          enablePartialMatching &&
           channelMessage.webhook_id == null && !channelMessage.author.bot &&
           isMessagePartialMatch(channelMessage.content)
         ) {
@@ -406,7 +435,7 @@ export async function handleWorkaholicCommand(
       )
       : null;
     const partialMatchWarning = makePartialMatchWarning({
-      messages: partialMatchMessages,
+      messages: enablePartialMatching ? partialMatchMessages : [],
       getNicknameByUserId,
     });
 
