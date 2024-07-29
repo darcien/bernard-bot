@@ -1,5 +1,5 @@
 import { CommandContext, makeCommand } from "./command_utils.ts";
-import { ApplicationCommandOptionType } from "./deps.ts";
+import { ApplicationCommandOptionType } from "$discord-api-types";
 
 enum RollCommandOption {
   Sides = "sides",

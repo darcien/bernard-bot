@@ -6,7 +6,7 @@ import {
 import {
   ApplicationCommandOptionType,
   InteractionResponseType,
-} from "./deps.ts";
+} from "$discord-api-types";
 import { ChatMessage } from "./queue.ts";
 
 enum ChatCommandOption {

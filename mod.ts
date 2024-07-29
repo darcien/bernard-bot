@@ -5,12 +5,10 @@ import {
   APIInteractionResponseChannelMessageWithSource,
   InteractionResponseType,
   InteractionType,
-  json,
-  loadSync,
-  serve,
-  sign,
-  validateRequest,
-} from "./deps.ts";
+} from "$discord-api-types";
+import { json, serve, validateRequest } from "$sift";
+import { loadSync } from "@std/dotenv";
+import { sign } from "$tweetnacl";
 import { handleCommands } from "./commands.ts";
 import { makeWebhookResponseFromHandlerResult } from "./webhook_response.ts";
 import { handleQueueMessage } from "./queue.ts";

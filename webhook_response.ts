@@ -2,10 +2,8 @@ import { CommandHandlerResult } from "./command_utils.ts";
 import {
   APIInteractionResponseChannelMessageWithSource,
   InteractionResponseType,
-  json,
-  Status,
-  STATUS_TEXT,
-} from "./deps.ts";
+} from "$discord-api-types";
+import { json, Status, STATUS_TEXT } from "$sift";
 
 export function multipart(
   formData: FormData,

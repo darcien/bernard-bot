@@ -1,5 +1,4 @@
 import {
-  loadSync,
   RESTGetAPIChannelMessagesResult,
   RESTGetAPIGuildMembersQuery,
   RESTGetAPIGuildMembersResult,
@@ -7,7 +6,8 @@ import {
   RESTPatchAPIInteractionOriginalResponseResult,
   RESTPostAPIInteractionFollowupJSONBody,
   RESTPostAPIInteractionFollowupResult,
-} from "./deps.ts";
+} from "$discord-api-types";
+import { loadSync } from "@std/dotenv";
 
 const config = loadSync();
 

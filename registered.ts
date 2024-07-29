@@ -1,4 +1,4 @@
-import { loadSync } from "./deps.ts";
+import { loadSync } from "@std/dotenv";
 import { makeDiscordApiUrl } from "./discord_api.ts";
 
 const config = loadSync();

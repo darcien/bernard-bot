@@ -1,4 +1,4 @@
-import { assertEquals } from "https://deno.land/std@0.197.0/assert/mod.ts";
+import { assertEquals } from "@std/assert";
 import { addParamsToUrl, makeDiscordApiUrl } from "./discord_api.ts";
 
 Deno.test("makeDiscordApiUrl", () => {

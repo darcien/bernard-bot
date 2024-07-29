@@ -1,9 +1,9 @@
 import { commands } from "./commands.ts";
 import { makeDiscordApiUrl } from "./discord_api.ts";
+import { loadSync } from "@std/dotenv";
 import {
-  loadSync,
   RESTPostAPIChatInputApplicationCommandsJSONBody,
-} from "./deps.ts";
+} from "$discord-api-types";
 
 const config = loadSync();
 

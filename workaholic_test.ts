@@ -1,5 +1,5 @@
-import { assertEquals } from "https://deno.land/std@0.197.0/assert/mod.ts";
-import { assertSnapshot } from "https://deno.land/std@0.197.0/testing/snapshot.ts";
+import { assertEquals } from "@std/assert";
+import { assertSnapshot } from "@std/testing";
 
 import {
   formatWorkaholicAddCommand,
@@ -8,7 +8,7 @@ import {
   parseMessageForSummary,
   WorkaholicType,
 } from "./workaholic.ts";
-import { APIMessage } from "./deps.ts";
+import { APIMessage } from "$discord-api-types";
 
 Deno.test("isMessagePartialMatch", () => {
   assertEquals(

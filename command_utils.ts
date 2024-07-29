@@ -3,7 +3,7 @@ import {
   APIUser,
   InteractionResponseType,
   RESTPostAPIChatInputApplicationCommandsJSONBody,
-} from "./deps.ts";
+} from "$discord-api-types";
 
 export function makeCommand(
   c: RESTPostAPIChatInputApplicationCommandsJSONBody,

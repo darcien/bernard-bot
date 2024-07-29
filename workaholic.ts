@@ -8,8 +8,8 @@ import {
   APIMessage,
   APIUser,
   ApplicationCommandOptionType,
-  markdownTable,
-} from "./deps.ts";
+} from "$discord-api-types";
+import { markdownTable } from "$markdown-table";
 import { getGuildMembers, getMessagesFromChannel } from "./discord_api.ts";
 
 enum WorkaholicSubcommandOption {

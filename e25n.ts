@@ -1,6 +1,6 @@
 import { CommandContext, makeCommand } from "./command_utils.ts";
 import { e25n } from "./deps.ts";
-import { ApplicationCommandOptionType } from "./deps.ts";
+import { ApplicationCommandOptionType } from "$discord-api-types";
 
 enum E25nCommandOption {
   Input = "input",

@@ -1,4 +1,5 @@
-import { loadSync, OpenAI } from "./deps.ts";
+import { loadSync } from "@std/dotenv";
+import { OpenAI } from "$openai";
 
 const config = loadSync();
 
