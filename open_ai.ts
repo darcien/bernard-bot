@@ -14,7 +14,7 @@ export function getOpenAiClient(): OpenAI {
     apiKey: config.GLHF_API_KEY,
     baseURL: "https://glhf.chat/api/openai/v1",
     maxRetries: 1,
-    timeout: 60 * 1000, // 60 seconds (default is 10 minutes)
+    timeout: 3 * 60 * 1000, // 3 mins (default is 10 minutes)
   });
 
   return client;
