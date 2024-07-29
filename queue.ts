@@ -25,29 +25,37 @@ export async function handleQueueMessage(msg: QueueMessage): Promise<void> {
     case "chat_message": {
       const client = getOpenAiClient();
 
-      const completion = await client.chat.completions.create({
-        messages: [
-          // This is still not ideal because
-          // the session is restarted on every message.
-          // Ideally we should create a session,
-          // and pick up the chat from the session until it expired.
-          {
-            role: "system",
-            content: systemPrompt,
-          },
-          {
-            role: "user",
-            content: msg.message,
-          },
-        ],
-        model: "hf:meta-llama/Meta-Llama-3.1-405B-Instruct",
-        n: 1,
-      });
+      try {
+        const completion = await client.chat.completions.create({
+          messages: [
+            // This is still not ideal because
+            // the session is restarted on every message.
+            // Ideally we should create a session,
+            // and pick up the chat from the session until it expired.
+            {
+              role: "system",
+              content: systemPrompt,
+            },
+            {
+              role: "user",
+              content: msg.message,
+            },
+          ],
+          model: "hf:meta-llama/Meta-Llama-3.1-405B-Instruct",
+          n: 1,
+        });
 
-      await createFollowupMessage({
-        message: completion.choices[0]?.message.content ?? "kurang tau bro",
-        interactionToken: msg.interaction_token,
-      });
+        await createFollowupMessage({
+          message: completion.choices[0]?.message.content ?? "kurang tau bro",
+          interactionToken: msg.interaction_token,
+        });
+      } catch (error) {
+        console.error(error);
+        await createFollowupMessage({
+          message: `error bro, katanya "${error?.message}"`,
+          interactionToken: msg.interaction_token,
+        });
+      }
 
       return;
     }
