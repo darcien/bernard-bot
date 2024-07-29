@@ -34,7 +34,7 @@ deploy:
   deployctl deploy --token=$DENO_DEPLOY_TOKEN
 
 deploy-prod:
-  deployctl deploy --token=$DENO_DEPLOY_TOKEN --prod --save-config
+  deployctl deploy --token=$DENO_DEPLOY_TOKEN --prod
 
 test:
   deno test {{default-permission}}
