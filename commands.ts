@@ -1,6 +1,7 @@
 import { chatCommand, handleChatCommand } from "./chat.ts";
 import { CommandContext, CommandHandler } from "./command_utils.ts";
 import { e25nCommand, handleE25nCommand } from "./e25n.ts";
+import { handleHttpCommand, httpCommand } from "./http.ts";
 import { handleRollCommand, rollCommand } from "./roll.ts";
 import { handleWorkaholicCommand, workaholicCommand } from "./workaholic.ts";
 
@@ -9,6 +10,7 @@ export const commands = [
   workaholicCommand,
   e25nCommand,
   chatCommand,
+  httpCommand,
 ];
 
 const commandHandlerMap: Record<string, CommandHandler> = {
@@ -16,6 +18,7 @@ const commandHandlerMap: Record<string, CommandHandler> = {
   [workaholicCommand.name]: handleWorkaholicCommand,
   [e25nCommand.name]: handleE25nCommand,
   [chatCommand.name]: handleChatCommand,
+  [httpCommand.name]: handleHttpCommand,
 };
 
 export function handleCommands(
