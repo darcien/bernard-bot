@@ -1,30 +1,29 @@
 import { loadSync } from "@std/dotenv";
-import { makeDiscordApiUrl } from "./discord_api.ts";
+import { fetchAsBot, makeDiscordApiUrl } from "./discord_api.ts";
+import {
+  RESTGetAPIApplicationCommandsResult,
+  Routes,
+} from "$discord-api-types";
 
 const config = loadSync();
 
 // https://discord.com/developers/docs/interactions/application-commands#get-global-application-commands
 const getAllCommandsUrl = makeDiscordApiUrl(
-  `/applications/${config.DISCORD_APPLICATION_ID}/commands`,
+  Routes.applicationCommands(config.DISCORD_APPLICATION_ID!),
 );
 
 async function getAllCommands() {
   console.log(`Getting all commands...`);
 
-  const result = await fetch(getAllCommandsUrl, {
+  const result = await fetchAsBot(getAllCommandsUrl, {
     method: "GET",
-    headers: {
-      Authorization: `Bot ${config.DISCORD_BOT_TOKEN}`,
-    },
   });
 
-  const res = await result.json();
+  const res = await result.json() as RESTGetAPIApplicationCommandsResult;
   console.dir(res, {
     depth: Infinity,
   });
-  const commandCount = "length" in res && typeof res.length === "number"
-    ? res.length
-    : null;
+  const commandCount = Array.isArray(res) ? res.length : null;
 
   if (commandCount != null) {
     console.log(`Total registered commands=${commandCount}`);
