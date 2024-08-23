@@ -43,6 +43,7 @@ Prerequisites:
 
 [just]: https://github.com/casey/just
 
+Steps:
 - [Create a Discord app](https://discord.com/developers/docs/quick-start/getting-started)
 - Prepare the environment variables.
   - See .env.example for example.
@@ -50,12 +51,14 @@ Prerequisites:
   - `GLHF_API_KEY` is needed for the OpenAPI style chat.
 - [Register][register] the available commands to Discord by running `just register`.
 - Deploy the main entry file somewhere reachable by Discord.
+  - Deploying outside Deno Deploy is untested.
+  - Probably need to setup KV access, see [this manual][kv-from-outside-deno-deploy].
 - Update the application interaction URL to point to the deployed file.
-- Add the application a Discord server.
-- You should be able to use the slash command from the bot and get responses back.
+- Add the application to a Discord server.
+- You should be able to use the slash command now.
 
 [register]: https://discord.com/developers/docs/interactions/application-commands#registering-a-command
-
+[kv-from-outside-deno-deploy]: https://docs.deno.com/deploy/kv/manual/on_deploy/#connect-to-managed-databases-from-outside-of-deno-deploy
 
 ## Why use `just` instead of `deno task`?
 
