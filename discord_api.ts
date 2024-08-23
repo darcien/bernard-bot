@@ -4,20 +4,20 @@ import {
   RESTGetAPIGuildMembersResult,
   RESTPatchAPIInteractionOriginalResponseJSONBody,
   RESTPatchAPIInteractionOriginalResponseResult,
+  RESTPostAPIChannelMessageJSONBody,
+  RESTPostAPIChannelMessageResult,
   RESTPostAPIInteractionFollowupJSONBody,
   RESTPostAPIInteractionFollowupResult,
+  RouteBases,
+  Routes,
 } from "$discord-api-types";
 import { loadSync } from "@std/dotenv";
 
 const config = loadSync();
 
-const DISCORD_BASE_URL = "https://discord.com";
-const DISCORD_API_VERSION = 10;
-
 // https://discord.com/developers/docs/reference
 export function makeDiscordApiUrl(path: string) {
-  return new URL(`/api/v${DISCORD_API_VERSION}${path}`, DISCORD_BASE_URL)
-    .toString();
+  return `${RouteBases.api}${path}`;
 }
 
 const defaultAuthenticatedHeaders = {
@@ -68,6 +68,33 @@ export async function getMessagesFromChannel(
   ) as RESTGetAPIChannelMessagesResult;
 
   return messages;
+}
+
+export async function sendMessageToChannel(
+  { channelId, message }: { channelId: string; message: string },
+) {
+  const url = makeDiscordApiUrl(
+    Routes.channelMessages(channelId),
+  );
+
+  const body: RESTPostAPIChannelMessageJSONBody = {
+    content: message.slice(0, 2000),
+  };
+
+  const res = await fetchAsBot(url, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to send message to channel ${channelId}`);
+  }
+
+  const sentMessage = (
+    await res.json()
+  ) as RESTPostAPIChannelMessageResult;
+
+  return sentMessage;
 }
 
 export function addParamsToUrl(

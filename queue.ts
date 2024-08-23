@@ -1,4 +1,4 @@
-import { createFollowupMessage } from "./discord_api.ts";
+import { createFollowupMessage, sendMessageToChannel } from "./discord_api.ts";
 import { getOpenAiClient } from "./open_ai.ts";
 
 export type ChatMessage = {
@@ -7,7 +7,14 @@ export type ChatMessage = {
   interaction_token: string;
 };
 
-export type QueueMessage = ChatMessage;
+export type ReminderMessage = {
+  type: "reminder";
+  message: string;
+  userId: string;
+  channelId: string;
+};
+
+export type QueueMessage = ChatMessage | ReminderMessage;
 
 const systemPrompt = `Your name is Bernard.
 Everyone already knows your name,
@@ -59,8 +66,15 @@ export async function handleQueueMessage(msg: QueueMessage): Promise<void> {
 
       return;
     }
+    case "reminder": {
+      await sendMessageToChannel({
+        channelId: msg.channelId,
+        message: msg.message,
+      });
+      return;
+    }
     default: {
-      const _: never = msg.type;
+      const _: never = msg;
       return;
     }
   }
