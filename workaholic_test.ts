@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { assertSnapshot } from "@std/testing";
+import { assertSnapshot } from "@std/testing/snapshot";
 
 import {
   formatWorkaholicAddCommand,
