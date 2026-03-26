@@ -34,11 +34,26 @@ The [main entry file][main-entry-file] does 2 things:
 
 [main-entry-file]: mod.ts
 
+## Common commands
+
+```sh
+# start dev server with file watching
+just dev
+
+# register slash commands to Discord
+just register
+
+# format, lint, and type-check
+deno task check
+
+# run tests
+just test
+```
+
 ## Okay, I'm interested, how do I run this?
 
 Prerequisites:
 - [Deno][deno], whatever is the latest 1.x version.
-  - This bot needs unstable features like Deno KV.
 - [just][just] for command runner.
 
 [just]: https://github.com/casey/just
@@ -47,18 +62,14 @@ Steps:
 - [Create a Discord app](https://discord.com/developers/docs/quick-start/getting-started)
 - Prepare the environment variables.
   - See .env.example for example.
-  - `DENO_DEPLOY_*` envs are only needed if you want to run this via Deno Deploy.
   - `GLHF_API_KEY` is needed for the OpenAPI style chat.
 - [Register][register] the available commands to Discord by running `just register`.
 - Deploy the main entry file somewhere reachable by Discord.
-  - Deploying outside Deno Deploy is untested.
-  - Probably need to setup KV access, see [this manual][kv-from-outside-deno-deploy].
 - Update the application interaction URL to point to the deployed file.
 - Add the application to a Discord server.
 - You should be able to use the slash command now.
 
 [register]: https://discord.com/developers/docs/interactions/application-commands#registering-a-command
-[kv-from-outside-deno-deploy]: https://docs.deno.com/deploy/kv/manual/on_deploy/#connect-to-managed-databases-from-outside-of-deno-deploy
 
 ## Why use `just` instead of `deno task`?
 
