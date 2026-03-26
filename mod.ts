@@ -18,11 +18,13 @@ if (config.DISCORD_PUBLIC_KEY == null) {
   throw new Error("Missing DISCORD_PUBLIC_KEY");
 }
 
+const port = Number(config.PORT || Deno.env.get("PORT")) || 4650;
+
 // For all requests to "/" endpoint, we want to invoke home() handler.
 serve({
   "/": home,
   "/ping": () => json({ message: "Pong!" }),
-});
+}, { port });
 
 // The main logic of the Discord Slash Command is defined in this function.
 async function home(request: Request) {
