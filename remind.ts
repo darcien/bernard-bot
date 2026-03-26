@@ -1,13 +1,8 @@
-import {
-  CommandContext,
-  CommandHandlerResult,
-  makeCommand,
-} from "./command_utils.ts";
+import { CommandHandlerResult, makeCommand } from "./command_utils.ts";
 import {
   ApplicationCommandOptionType,
   InteractionResponseType,
 } from "$discord-api-types";
-import { ReminderMessage } from "./queue.ts";
 
 enum RemindCommandOption {
   Message = "message",
@@ -61,76 +56,10 @@ export const remindCommand = makeCommand({
   ],
 });
 
-export async function handleRemindCommand(
-  {
-    interactionData,
-    db,
-    user,
-    channelId,
-  }: CommandContext,
-): Promise<CommandHandlerResult> {
-  const options = interactionData.options || [];
-
-  const messageOption = options.find(
-    (option) => option.name === RemindCommandOption.Message,
-  );
-
-  const message = messageOption?.type === ApplicationCommandOptionType.String
-    ? messageOption.value
-    : "no messsage";
-
-  const whoOption = options.find(
-    (option) => option.name === RemindCommandOption.Who,
-  );
-
-  const who = whoOption?.type === ApplicationCommandOptionType.User
-    ? whoOption.value
-    : user.id;
-
-  const daysOption = options.find(
-    (option) => option.name === RemindCommandOption.Days,
-  );
-  const hoursOption = options.find(
-    (option) => option.name === RemindCommandOption.Hours,
-  );
-  const minutesOption = options.find(
-    (option) => option.name === RemindCommandOption.Minutes,
-  );
-
-  const [days, hours, minutes] = [
-    daysOption,
-    hoursOption,
-    minutesOption,
-  ].map((o) =>
-    o?.type === ApplicationCommandOptionType.Integer ? o.value : 0
-  ) as [number, number, number];
-
-  const delayInSeconds = (days * 24 * 60 * 60) + (hours * 60 * 60) +
-    (minutes * 60);
-
-  if (delayInSeconds <= 0) {
-    return {
-      responseType: InteractionResponseType.ChannelMessageWithSource,
-      responseText: "Please specify at least one of: days, hours, or minutes.",
-    };
-  }
-
-  const reminderMessage = `<@${who}> ${message}`;
-
-  await db.enqueue(
-    {
-      type: "reminder",
-      message: reminderMessage,
-      userId: who,
-      channelId,
-    } satisfies ReminderMessage,
-    {
-      delay: delayInSeconds * 1000,
-    },
-  );
-
+export function handleRemindCommand(): CommandHandlerResult {
   return {
     responseType: InteractionResponseType.ChannelMessageWithSource,
-    responseText: "OK 👌",
+    responseText:
+      "Remind is temporarily offline due to the current global economic climate.",
   };
 }

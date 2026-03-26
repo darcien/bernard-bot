@@ -18,7 +18,6 @@ export type CommandContext = {
   guildId: string;
   interactionId: string;
   interactionToken: string;
-  db: Deno.Kv;
 };
 
 export type CommandHandlerResult = {

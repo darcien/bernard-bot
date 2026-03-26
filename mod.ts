@@ -1,4 +1,3 @@
-/// <reference lib="deno.unstable" />
 import {
   APIChatInputApplicationCommandInteractionData,
   APIInteraction,
@@ -11,7 +10,6 @@ import { loadSync } from "@std/dotenv";
 import { sign } from "$tweetnacl";
 import { handleCommands } from "./commands.ts";
 import { makeWebhookResponseFromHandlerResult } from "./webhook_response.ts";
-import { handleQueueMessage } from "./queue.ts";
 
 // Local uses .env file
 const config = loadSync();
@@ -25,10 +23,6 @@ serve({
   "/": home,
   "/ping": () => json({ message: "Pong!" }),
 });
-
-const db = await Deno.openKv();
-
-db.listenQueue(handleQueueMessage);
 
 // The main logic of the Discord Slash Command is defined in this function.
 async function home(request: Request) {
@@ -108,7 +102,6 @@ async function home(request: Request) {
         user,
         channelId: channel.id,
         guildId: guild_id,
-        db,
       });
 
       if (handlerOutput == null) {
