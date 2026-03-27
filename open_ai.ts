@@ -3,6 +3,9 @@ import { OpenAI } from "$openai";
 
 const config = loadSync();
 
+// TODO: Replace with a working OpenAI-compatible provider
+const OPENAI_BASE_URL = "https://glhf.chat/api/openai/v1";
+
 let client: OpenAI | null = null;
 
 export function getOpenAiClient(): OpenAI {
@@ -11,8 +14,8 @@ export function getOpenAiClient(): OpenAI {
   }
 
   client = new OpenAI({
-    apiKey: config.GLHF_API_KEY,
-    baseURL: "https://glhf.chat/api/openai/v1",
+    apiKey: config.OPENAI_API_KEY,
+    baseURL: OPENAI_BASE_URL,
     maxRetries: 1,
     timeout: 3 * 60 * 1000, // 3 mins (default is 10 minutes)
   });

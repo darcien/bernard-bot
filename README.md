@@ -62,7 +62,6 @@ Steps:
 - [Create a Discord app](https://discord.com/developers/docs/quick-start/getting-started)
 - Prepare the environment variables.
   - See .env.example for example.
-  - `GLHF_API_KEY` is needed for the OpenAPI style chat.
 - [Register][register] the available commands to Discord by running `just register`.
 - Deploy the main entry file somewhere reachable by Discord.
 - Update the application interaction URL to point to the deployed file.

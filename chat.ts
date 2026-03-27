@@ -81,12 +81,22 @@ async function processChatMessage(
   }
 }
 
+const IS_CHAT_AVAILABLE = false;
+
 export function handleChatCommand(
   {
     interactionToken,
     interactionData,
   }: CommandContext,
 ): CommandHandlerResult {
+  if (!IS_CHAT_AVAILABLE) {
+    return {
+      responseType: InteractionResponseType.ChannelMessageWithSource,
+      responseText:
+        "Chat is temporarily offline due to the current global economic climate.",
+    };
+  }
+
   const options = interactionData.options || [];
 
   const messageOption = options.find(
