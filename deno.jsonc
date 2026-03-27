@@ -19,6 +19,6 @@
     "@std/testing": "jsr:@std/testing@^1.0.0"
   },
   "tasks": {
-    "check": "deno fmt & deno lint & deno check **/*.ts"
+    "check": "deno fmt & deno lint & deno check --allow-import=cdn.skypack.dev,deno.land,jsr.io,esm.sh **/*.ts"
   }
 }
