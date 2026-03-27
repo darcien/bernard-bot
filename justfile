@@ -1,6 +1,6 @@
 set dotenv-load
 
-default-permission := "--allow-read=./ --allow-env --allow-net='0.0.0.0:8000,discord.com'"
+default-permission := "--allow-read=./ --allow-env --allow-net --allow-import=cdn.skypack.dev,deno.land,jsr.io,esm.sh"
 
 # List all available targets if just is executed with no arguments
 default:
