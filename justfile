@@ -41,3 +41,59 @@ test:
 
 update-snapshot:
   deno test {{default-permission}} --allow-write -- --update
+
+# Format, vet, and build Go code (run before committing)
+go-check:
+  cd v2 && go fmt ./... && go vet ./... && go build ./...
+
+# Run Go tests
+go-test:
+  cd v2 && go test ./...
+
+# Run Go server locally (uses .env)
+go-run:
+  cd v2 && go run .
+
+# Run Go server with .env.test credentials (for testing against a separate Discord app)
+go-run-test:
+  #!/usr/bin/env bash
+  set -a && source "{{justfile_directory()}}/.env.test" && set +a
+  cd v2 && go run .
+
+# Register all commands to the production Discord application (uses .env)
+go-register:
+  cd v2 && go run ./cmd/manage register
+
+# Register all commands to the test Discord application (uses .env.test at repo root)
+go-register-test:
+  #!/usr/bin/env bash
+  set -a && source "{{justfile_directory()}}/.env.test" && set +a
+  cd v2 && go run ./cmd/manage register
+
+# List registered commands in the production Discord application (uses .env)
+go-list:
+  cd v2 && go run ./cmd/manage list
+
+# List registered commands in the test Discord application (uses .env.test at repo root)
+go-list-test:
+  #!/usr/bin/env bash
+  set -a && source "{{justfile_directory()}}/.env.test" && set +a
+  cd v2 && go run ./cmd/manage list
+
+# Delete a registered command from the production Discord application (uses .env)
+go-delete commandId:
+  cd v2 && go run ./cmd/manage delete {{commandId}}
+
+# Delete a registered command from the test Discord application (uses .env.test at repo root)
+go-delete-test commandId:
+  #!/usr/bin/env bash
+  set -a && source "{{justfile_directory()}}/.env.test" && set +a
+  cd v2 && go run ./cmd/manage delete {{commandId}}
+
+# Build binary for local testing (macOS arm64)
+go-build:
+  cd v2 && go build -o ../bernard .
+
+# Cross-compile binary for Linux deployment
+go-build-linux:
+  cd v2 && GOOS=linux GOARCH=amd64 go build -o ../bernard-linux .
