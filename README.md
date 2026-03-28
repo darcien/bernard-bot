@@ -44,7 +44,7 @@ Steps:
 - [Create a Discord app](https://discord.com/developers/docs/quick-start/getting-started)
 - Prepare the environment variables.
   - See .env.example for example.
-- [Register][register] the available commands to Discord by running `just register`.
+- [Register][register] the available commands to Discord by running `just commands-register`.
 - Deploy the binary somewhere reachable by Discord.
 - Update the application interaction URL to point to the deployed server.
 - Add the application to a Discord server.

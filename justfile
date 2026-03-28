@@ -17,15 +17,15 @@ run:
     go run .
 
 # Register all commands to Discord Application
-register:
+commands-register:
     go run ./cmd/manage register
 
 # List registered commands in Discord Application
-list:
+commands-list:
     go run ./cmd/manage list
 
 # Delete a registered command from Discord Application
-delete commandId:
+commands-delete commandId:
     go run ./cmd/manage delete {{ commandId }}
 
 # Build binary

@@ -13,9 +13,9 @@ Commands live in the `commands/` package, and the server validates Discord's ED2
 ```sh
 just check            # Format, vet, and build (run before committing)
 just test             # Run all tests
-just register         # Register slash commands to Discord
-just list             # List registered commands
-just delete <id>      # Delete a command
+just commands-register         # Register slash commands to Discord
+just commands-list             # List registered commands
+just commands-delete <id>      # Delete a command
 ```
 
 ## Architecture
