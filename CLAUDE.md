@@ -4,44 +4,43 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is this?
 
-Bernard is a Discord slash command handler built with Deno.
+Bernard is a Discord slash command handler built with Go.
 It responds to Discord interactions via HTTP webhooks.
-Commands live as individual files, and the server validates Discord's ED25519 request signatures before dispatching to handlers.
+Commands live in the `commands/` package, and the server validates Discord's ED25519 request signatures before dispatching to handlers.
 
 ## Commands
 
 ```sh
+just check            # Format, vet, and build (run before committing)
 just test             # Run all tests
-just update-snapshot  # Update test snapshots
 just register         # Register slash commands to Discord
-just get-registered   # List registered commands
-just delete-registered <commandId>  # Delete a command
-
-deno task check       # Format, lint, and type-check (run before committing)
+just list             # List registered commands
+just delete <id>      # Delete a command
 ```
 
 ## Architecture
 
-Request flow: Discord POST → `mod.ts` (signature verification) → `commands.ts` (dispatch) → command handler → `webhook_response.ts` (format) → HTTP response
+Request flow: Discord POST → `main.go` (signature verification) → `commands/registry.go` (dispatch) → command handler → `discord/response.go` (format) → HTTP response
 
 Adding a command:
-1. Create `<name>.ts` exporting a `makeCommand(...)` definition and a `handle<Name>Command` handler matching the `CommandHandler` type from `command_utils.ts`
-2. Register both in `commands.ts` (`commands` array + `commandHandlerMap`)
+1. Create `commands/<name>.go` with a handler matching the `Handler` type from `commands/registry.go`
+2. Add the command definition in `commands/definitions.go`
+3. Register the handler in `commands/registry.go`
 
-Key types (`command_utils.ts`):
+Key types (`commands/registry.go`):
 - `CommandContext` — what every handler receives (interaction data, user, IDs, token)
-- `CommandHandlerResult` — `{ responseText, responseType? }` that every handler returns
-- `CommandHandler` — the handler function signature
+- `CommandResult` — `{ ResponseText, ResponseType }` that every handler returns
+- `Handler` — the handler function signature
 
-Response formatting (`webhook_response.ts`): Responses under 2000 chars are sent as JSON; larger responses become markdown file attachments via multipart FormData.
+Response formatting (`discord/response.go`): Responses under 2000 chars (UTF-16 length, matching Discord's limit) are sent as JSON; larger responses become markdown file attachments via multipart FormData.
 
-Deferred responses: Long-running commands return `InteractionResponseType.DeferredChannelMessageWithSource` immediately, then call Discord's webhook API to send a followup. See `discord_api.ts` for the followup helper.
+Deferred responses: Long-running commands (e.g. `/workaholic check`) return `DeferredChannelMessageWithSource` immediately, then fetch data and respond. See `discord/api.go` for the Discord API helpers.
 
 ## Environment variables
 
-See `.env.example`. Required: `DISCORD_APPLICATION_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`. The `justfile` loads `.env` automatically via `set dotenv-load`.
+See `.env.example`. Required: `DISCORD_APPLICATION_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`.
+The `justfile` loads `.env` automatically via `set dotenv-load`.
 
 ## Notes
 
-- `deps.ts` exists as a workaround for a Deno import resolution bug (issue #17784) with the e25n package.
-- `/chat` and `/remind` are currently disabled and not supported.
+- `/chat` and `/remind` are currently disabled and not implemented.

@@ -1,6 +1,4 @@
 {
-  "deno.enable": true,
-  "deno.unstable": true,
   "workbench.colorCustomizations": {
     "activityBar.activeBackground": "#b6c6b2",
     "activityBar.background": "#b6c6b2",
@@ -21,17 +19,8 @@
     "titleBar.inactiveForeground": "#15202b99"
   },
   "peacock.color": "#9ab095",
-  "[typescript]": {
-    "editor.defaultFormatter": "denoland.vscode-deno"
-  },
-  "[json]": {
-    "editor.defaultFormatter": "denoland.vscode-deno"
-  },
-  "[jsonc]": {
-    "editor.defaultFormatter": "denoland.vscode-deno"
-  },
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.patterns": {
-    "*.ts": "${capture}.ts, ${capture}_test.ts"
+    "*.go": "${capture}.go, ${capture}_test.go"
   }
 }
