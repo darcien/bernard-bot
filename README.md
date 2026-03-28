@@ -52,6 +52,20 @@ Steps:
 
 [register]: https://discord.com/developers/docs/interactions/application-commands#registering-a-command
 
+## Deploy
+
+```sh
+# Build for linux, this creates `bernard-linux` binary
+just build-linux
+
+# Example command if you're doing traditional server
+rsync --progress bernard-linux <server>:/home/darcien/bernard-bot/bernard
+
+# Restart the systemd service so it picks up the new binary
+sudo systemctl restart bernard
+```
+
+
 ## Discord application configuration
 
 To add the bot to a server, generate an invite URL under OAuth2 → URL Generator with these scopes:
