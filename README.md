@@ -70,6 +70,14 @@ Steps:
 
 [register]: https://discord.com/developers/docs/interactions/application-commands#registering-a-command
 
+## Discord application configuration
+
+To add the bot to a server, generate an invite URL under OAuth2 → URL Generator with these scopes:
+- `bot` — makes the bot a guild member, required for REST API calls that read messages and members
+- `applications.commands` — registers slash commands in the server
+
+In your application → Bot → Privileged Gateway Intents, enable Server Members Intent. This is required because `/workaholic check` calls `GET /guilds/{id}/members` to resolve usernames, and Discord restricts this endpoint without the intent enabled.
+
 ## Why use `just` instead of `deno task`?
 
 This project was started before Deno introduced `deno task`.
