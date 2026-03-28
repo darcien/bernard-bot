@@ -9,54 +9,45 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
 	"bernard/commands"
 	"bernard/discord"
 )
 
-var discordPublicKey ed25519.PublicKey
+type server struct {
+	publicKey ed25519.PublicKey
+	botToken  string
+	port      string
+}
 
 func main() {
-	publicKeyHex := os.Getenv("DISCORD_PUBLIC_KEY")
-	if publicKeyHex == "" {
-		log.Fatal("Missing DISCORD_PUBLIC_KEY")
-	}
-	keyBytes, err := hex.DecodeString(publicKeyHex)
+	s, err := loadServer()
 	if err != nil {
-		log.Fatalf("Invalid DISCORD_PUBLIC_KEY: %v", err)
+		log.Fatal(err)
 	}
-	discordPublicKey = ed25519.PublicKey(keyBytes)
+	discord.SetBotToken(s.botToken)
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "4650"
-	}
-
-	http.HandleFunc("/ping", handlePing)
-	http.HandleFunc("/", handleInteraction)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /ping", s.handlePing)
+	mux.HandleFunc("POST /", s.handleInteraction)
 
 	srv := &http.Server{
-		Addr:         ":" + port,
+		Addr:         ":" + s.port,
+		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 30 * time.Second, // workaholic check calls Discord API, needs headroom
 	}
 
-	slog.Info("listening", "port", port)
+	slog.Info("listening", "port", s.port)
 	log.Fatal(srv.ListenAndServe())
 }
 
-func handlePing(w http.ResponseWriter, r *http.Request) {
+func (s *server) handlePing(w http.ResponseWriter, r *http.Request) {
 	discord.WriteJSON(w, http.StatusOK, discord.PingResponse{Message: "Pong!"})
 }
 
-func handleInteraction(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		discord.WriteJSON(w, http.StatusMethodNotAllowed, discord.ErrorResponse{Error: "method not allowed"})
-		return
-	}
-
+func (s *server) handleInteraction(w http.ResponseWriter, r *http.Request) {
 	signature := r.Header.Get("X-Signature-Ed25519")
 	timestamp := r.Header.Get("X-Signature-Timestamp")
 	if signature == "" || timestamp == "" {
@@ -71,7 +62,7 @@ func handleInteraction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !verifySignature(timestamp, body, signature) {
+	if !s.verifySignature(timestamp, body, signature) {
 		slog.Warn("invalid signature", "remote", r.RemoteAddr)
 		discord.WriteJSON(w, http.StatusUnauthorized, discord.ErrorResponse{Error: "invalid signature"})
 		return
@@ -146,8 +137,7 @@ func handleApplicationCommand(w http.ResponseWriter, interaction *discord.Intera
 }
 
 // verifySignature checks the ED25519 signature from Discord.
-// Matches verifySignature in mod.ts.
-func verifySignature(timestamp string, body []byte, signature string) bool {
+func (s *server) verifySignature(timestamp string, body []byte, signature string) bool {
 	sigBytes, err := hex.DecodeString(signature)
 	if err != nil {
 		return false
@@ -155,5 +145,5 @@ func verifySignature(timestamp string, body []byte, signature string) bool {
 	msg := make([]byte, len(timestamp)+len(body))
 	copy(msg, timestamp)
 	copy(msg[len(timestamp):], body)
-	return ed25519.Verify(discordPublicKey, msg, sigBytes)
+	return ed25519.Verify(s.publicKey, msg, sigBytes)
 }

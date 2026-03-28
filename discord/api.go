@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 )
 
@@ -16,7 +15,13 @@ const (
 	repoURL        = "https://github.com/darcien/bernard-bot"
 )
 
-var apiClient = &http.Client{Timeout: 10 * time.Second}
+var (
+	apiClient = &http.Client{Timeout: 10 * time.Second}
+	botToken  string
+)
+
+// SetBotToken stores the bot token for API calls. Must be called before any API use.
+func SetBotToken(token string) { botToken = token }
 
 func fetchAsBot(url string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -25,7 +30,7 @@ func fetchAsBot(url string) ([]byte, error) {
 	}
 	// https://discord.com/developers/docs/reference#user-agent
 	req.Header.Set("User-Agent", fmt.Sprintf("DiscordBot (%s)", repoURL))
-	req.Header.Set("Authorization", "Bot "+os.Getenv("DISCORD_BOT_TOKEN"))
+	req.Header.Set("Authorization", "Bot "+botToken)
 	req.Header.Set("Content-Type", "application/json")
 
 	start := time.Now()

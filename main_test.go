@@ -13,18 +13,15 @@ import (
 	"time"
 )
 
-// setupTestKeys generates a fresh ed25519 key pair, sets discordPublicKey to the
-// public key for the duration of the test, and returns the private key for signing.
-func setupTestKeys(t *testing.T) ed25519.PrivateKey {
+// newTestServer generates a fresh ed25519 key pair, returns a server with the
+// public key and the private key for signing test requests.
+func newTestServer(t *testing.T) (*server, ed25519.PrivateKey) {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	orig := discordPublicKey
-	discordPublicKey = pub
-	t.Cleanup(func() { discordPublicKey = orig })
-	return priv
+	return &server{publicKey: pub}, priv
 }
 
 // signedRequest builds a POST request to "/" with a valid Discord ED25519 signature.
@@ -50,9 +47,11 @@ func marshalJSON(t *testing.T, v any) string {
 }
 
 func TestHandlePing(t *testing.T) {
+	s, _ := newTestServer(t)
+
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	w := httptest.NewRecorder()
-	handlePing(w, req)
+	s.handlePing(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d", w.Code)
@@ -66,17 +65,8 @@ func TestHandlePing(t *testing.T) {
 	}
 }
 
-func TestHandleInteraction_MethodNotAllowed(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	w := httptest.NewRecorder()
-	handleInteraction(w, req)
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("want 405, got %d", w.Code)
-	}
-}
-
 func TestHandleInteraction_MissingHeaders(t *testing.T) {
-	setupTestKeys(t)
+	s, _ := newTestServer(t)
 
 	tests := []struct {
 		name      string
@@ -98,7 +88,7 @@ func TestHandleInteraction_MissingHeaders(t *testing.T) {
 				req.Header.Set("X-Signature-Timestamp", tc.tsHeader)
 			}
 			w := httptest.NewRecorder()
-			handleInteraction(w, req)
+			s.handleInteraction(w, req)
 			if w.Code != http.StatusUnauthorized {
 				t.Fatalf("want 401, got %d", w.Code)
 			}
@@ -107,7 +97,7 @@ func TestHandleInteraction_MissingHeaders(t *testing.T) {
 }
 
 func TestHandleInteraction_InvalidSignature(t *testing.T) {
-	setupTestKeys(t)
+	s, _ := newTestServer(t)
 
 	body := `{"type":1}`
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -115,20 +105,20 @@ func TestHandleInteraction_InvalidSignature(t *testing.T) {
 	req.Header.Set("X-Signature-Timestamp", fmt.Sprintf("%d", time.Now().Unix()))
 
 	w := httptest.NewRecorder()
-	handleInteraction(w, req)
+	s.handleInteraction(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("want 401, got %d", w.Code)
 	}
 }
 
 func TestHandleInteraction_Ping(t *testing.T) {
-	priv := setupTestKeys(t)
+	s, priv := newTestServer(t)
 
 	body := marshalJSON(t, map[string]any{"type": 1})
 	req := signedRequest(t, priv, body)
 
 	w := httptest.NewRecorder()
-	handleInteraction(w, req)
+	s.handleInteraction(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d", w.Code)
@@ -143,7 +133,7 @@ func TestHandleInteraction_Ping(t *testing.T) {
 }
 
 func TestHandleInteraction_UnknownCommand(t *testing.T) {
-	priv := setupTestKeys(t)
+	s, priv := newTestServer(t)
 
 	body := marshalJSON(t, map[string]any{
 		"type":     2,
@@ -157,14 +147,14 @@ func TestHandleInteraction_UnknownCommand(t *testing.T) {
 	req := signedRequest(t, priv, body)
 
 	w := httptest.NewRecorder()
-	handleInteraction(w, req)
+	s.handleInteraction(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d", w.Code)
 	}
 }
 
 func TestHandleInteraction_MissingFields(t *testing.T) {
-	priv := setupTestKeys(t)
+	s, priv := newTestServer(t)
 
 	base := map[string]any{
 		"type":     2,
@@ -196,7 +186,7 @@ func TestHandleInteraction_MissingFields(t *testing.T) {
 
 			req := signedRequest(t, priv, marshalJSON(t, m))
 			w := httptest.NewRecorder()
-			handleInteraction(w, req)
+			s.handleInteraction(w, req)
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("want 400, got %d", w.Code)
 			}
@@ -205,20 +195,20 @@ func TestHandleInteraction_MissingFields(t *testing.T) {
 }
 
 func TestHandleInteraction_UnknownType(t *testing.T) {
-	priv := setupTestKeys(t)
+	s, priv := newTestServer(t)
 
 	body := marshalJSON(t, map[string]any{"type": 99})
 	req := signedRequest(t, priv, body)
 
 	w := httptest.NewRecorder()
-	handleInteraction(w, req)
+	s.handleInteraction(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d", w.Code)
 	}
 }
 
 func TestHandleInteraction_RollCommand(t *testing.T) {
-	priv := setupTestKeys(t)
+	s, priv := newTestServer(t)
 
 	body := marshalJSON(t, map[string]any{
 		"type":     2,
@@ -232,7 +222,7 @@ func TestHandleInteraction_RollCommand(t *testing.T) {
 	req := signedRequest(t, priv, body)
 
 	w := httptest.NewRecorder()
-	handleInteraction(w, req)
+	s.handleInteraction(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
 	}
