@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"log/slog"
 	"net/http"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"bernard/commands"
@@ -39,8 +43,26 @@ func main() {
 		WriteTimeout: 30 * time.Second, // workaholic check calls Discord API, needs headroom
 	}
 
-	slog.Info("listening", "port", s.port)
-	log.Fatal(srv.ListenAndServe())
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		slog.Info("listening", "port", s.port)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	}()
+
+	<-ctx.Done()
+	slog.Info("shutting down")
+
+	// Give in-flight requests time to finish.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatal(err)
+	}
+	slog.Info("stopped")
 }
 
 func (s *server) handlePing(w http.ResponseWriter, r *http.Request) {
