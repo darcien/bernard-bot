@@ -144,7 +144,7 @@ func handleApplicationCommand(w http.ResponseWriter, interaction *discord.Intera
 	dur := time.Since(start)
 	if err != nil {
 		slog.Error("command error", "command", cmdName, "user", username, "dur", dur, "err", err)
-		errMsg := fmt.Sprintf("💣💥 Oops, debug time!\nError: %v\nStack: No stack trace", err)
+		errMsg := fmt.Sprintf("💣💥 Oops, debug time!\nError: %v", err)
 		discord.RespondFromResult(w, discord.InteractionResponseTypeChannelMessageWithSource, errMsg)
 		return
 	}
