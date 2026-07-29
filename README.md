@@ -68,11 +68,23 @@ sudo systemctl restart bernard
 
 ## Discord application configuration
 
-To add the bot to a server, generate an invite URL under OAuth2 → URL Generator with these scopes:
-- `bot` — makes the bot a guild member, required for REST API calls that read messages and members
-- `applications.commands` — registers slash commands in the server
+To add the bot to a server, build an invite URL under OAuth2 → URL Generator.
+Integration type must be guild install.
 
-In your application → Bot → Privileged Gateway Intents, enable Server Members Intent. This is required because `/workaholic check` calls `GET /guilds/{id}/members` to resolve usernames, and Discord restricts this endpoint without the intent enabled.
+Scopes:
+- `bot` - makes the bot a guild member, so REST API calls with the bot token work
+- `applications.commands` - registers slash commands in the server
+
+Bot permissions, both needed by `/workaholic check` to read past messages in the
+channel it runs in:
+- View Channels, under General Permissions
+- Read Message History, under Text Permissions
+
+Under Bot → Privileged Gateway Intents:
+- Server Members Intent - `/workaholic check` lists guild members to resolve
+  usernames, and Discord restricts that without the intent
+
+Channel-level permission overrides still apply on top of the invite.
 
 ## Why Golang?
 
