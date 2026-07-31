@@ -87,7 +87,7 @@ func (c *Client) Complete(systemPrompt, userMessage string) (string, error) {
 		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("llm API %d: %s", resp.StatusCode, truncate(string(body), 300))
+		return "", fmt.Errorf("llm API %d from %s: %s", resp.StatusCode, req.URL.Host+req.URL.Path, truncate(string(body), 300))
 	}
 
 	var parsed chatResponse
