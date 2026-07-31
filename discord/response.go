@@ -50,18 +50,28 @@ func RespondFromResult(w http.ResponseWriter, responseType InteractionResponseTy
 // Matches makeReplyAsMarkdownAttachment in webhook_response.ts.
 // https://discord.com/developers/docs/reference#uploading-files
 func respondMultipart(w http.ResponseWriter, responseType InteractionResponseType, content string) {
-	// Strip ```markdown ... ``` fences — same hack as the TS version.
-	if bytes.Contains([]byte(content), []byte("```markdown")) {
-		content = rgxMarkdownOpen.ReplaceAllString(content, "")
-		content = rgxMarkdownClose.ReplaceAllString(content, "\n")
-	}
-
 	payloadJSON, _ := json.Marshal(MessageResponse{
 		Type: responseType,
 		Data: MessageResponseData{
 			Attachments: []Attachment{{ID: 0, Filename: "response.md"}},
 		},
 	})
+
+	contentType, body := multipartAttachment(payloadJSON, content)
+
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// multipartAttachment builds a multipart body with payloadJSON and content as
+// a response.md file part. Shared by interaction responses and followups.
+func multipartAttachment(payloadJSON []byte, content string) (contentType string, body []byte) {
+	// Strip ```markdown ... ``` fences — same hack as the TS version.
+	if bytes.Contains([]byte(content), []byte("```markdown")) {
+		content = rgxMarkdownOpen.ReplaceAllString(content, "")
+		content = rgxMarkdownClose.ReplaceAllString(content, "\n")
+	}
 
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
@@ -80,9 +90,7 @@ func respondMultipart(w http.ResponseWriter, responseType InteractionResponseTyp
 
 	mw.Close()
 
-	w.Header().Set("Content-Type", mw.FormDataContentType())
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(buf.Bytes())
+	return mw.FormDataContentType(), buf.Bytes()
 }
 
 // utf16Len returns the number of UTF-16 code units in s,

@@ -37,6 +37,24 @@ func CommandDefinitions() []CommandDefinition {
 		e25nDefinition(),
 		httpDefinition(),
 		workaholicDefinition(),
+		chatDefinition(),
+	}
+}
+
+func chatDefinition() CommandDefinition {
+	return CommandDefinition{
+		Name:        "chat",
+		Description: "Chat with me",
+		Options: []CommandOption{
+			{
+				Name:        "message",
+				Description: "Your message for me",
+				Type:        discord.OptionTypeString,
+				Required:    true,
+				MinLength:   intPtr(1),
+				MaxLength:   intPtr(2000),
+			},
+		},
 	}
 }
 

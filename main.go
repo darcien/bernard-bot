@@ -17,12 +17,17 @@ import (
 
 	"bernard/commands"
 	"bernard/discord"
+	"bernard/llm"
 )
 
 type server struct {
-	publicKey ed25519.PublicKey
-	botToken  string
-	port      string
+	publicKey     ed25519.PublicKey
+	botToken      string
+	applicationID string
+	port          string
+	llmBaseURL    string
+	llmAPIKey     string
+	llmModel      string
 }
 
 func main() {
@@ -31,6 +36,14 @@ func main() {
 		log.Fatal(err)
 	}
 	discord.SetBotToken(s.botToken)
+
+	var llmClient *llm.Client
+	if s.llmBaseURL != "" && s.llmAPIKey != "" {
+		llmClient = llm.NewClient(s.llmBaseURL, s.llmAPIKey, s.llmModel)
+	} else {
+		slog.Warn("LLM config missing, /chat is offline")
+	}
+	commands.ConfigureChat(llmClient, s.applicationID)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", s.handlePing)
@@ -61,6 +74,13 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatal(err)
+	}
+
+	// Deferred commands run followups in goroutines the server doesn't track.
+	// 85s = LLM timeout (60s) + followup (10s) + retry sleep (2s) + retry (10s),
+	// with headroom.
+	if !commands.WaitBackground(85 * time.Second) {
+		slog.Warn("background tasks did not finish before timeout")
 	}
 	slog.Info("stopped")
 }

@@ -16,6 +16,14 @@ test:
 run:
     go run .
 
+# Run server with test app creds (.env.test overrides .env)
+run-test:
+    set -a && . ./.env.test && set +a && go run .
+
+# Register commands to the test Discord application
+commands-register-test:
+    set -a && . ./.env.test && set +a && go run ./cmd/manage register
+
 # Register all commands to Discord Application
 commands-register:
     go run ./cmd/manage register

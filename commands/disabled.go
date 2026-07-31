@@ -12,25 +12,6 @@ package commands
 
 import "bernard/discord"
 
-// chatDefinition is disabled because it needs a new LLM provider.
-// When reimplemented, it should use a deferred response (DeferredChannelMessageWithSource)
-// since the LLM call is async, giving Discord the "Bernard is thinking..." loading state.
-func chatDefinition() CommandDefinition {
-	return CommandDefinition{
-		Name:        "chat",
-		Description: "Chat with me",
-		Options: []CommandOption{
-			{
-				Name:        "message",
-				Description: "Your message for me",
-				Type:        discord.OptionTypeString,
-				Required:    true,
-				MinLength:   intPtr(1),
-			},
-		},
-	}
-}
-
 // remindDefinition is disabled because it depended on Deno.Kv queue which was
 // removed during the Go migration. Needs a persistent job store to reimplement.
 func remindDefinition() CommandDefinition {

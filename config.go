@@ -22,14 +22,29 @@ func loadServer() (*server, error) {
 		return nil, fmt.Errorf("missing DISCORD_BOT_TOKEN")
 	}
 
+	applicationID := os.Getenv("DISCORD_APPLICATION_ID")
+	if applicationID == "" {
+		return nil, fmt.Errorf("missing DISCORD_APPLICATION_ID")
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "4650"
 	}
 
+	// LLM config is optional — /chat goes offline when base URL or key is unset.
+	llmModel := os.Getenv("LLM_MODEL")
+	if llmModel == "" {
+		llmModel = "deepseek-v4-flash"
+	}
+
 	return &server{
-		publicKey: ed25519.PublicKey(keyBytes),
-		botToken:  botToken,
-		port:      port,
+		publicKey:     ed25519.PublicKey(keyBytes),
+		botToken:      botToken,
+		applicationID: applicationID,
+		port:          port,
+		llmBaseURL:    os.Getenv("LLM_BASE_URL"),
+		llmAPIKey:     os.Getenv("LLM_API_KEY"),
+		llmModel:      llmModel,
 	}, nil
 }
