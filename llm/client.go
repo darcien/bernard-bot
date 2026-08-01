@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"bernard/logid"
 )
 
 // Client talks to any OpenAI-compatible chat completions endpoint.
@@ -161,7 +163,7 @@ func (c *Client) Chat(ctx context.Context, msgs []Message, tools json.RawMessage
 	if n := len(choice.Message.ToolCalls); n > 0 {
 		attrs = append(attrs, "tool_calls", n)
 	}
-	slog.Debug("llm call", attrs...)
+	slog.Debug("llm call", append(attrs, logid.Attrs(ctx)...)...)
 	return choice.Message, usage, nil
 }
 

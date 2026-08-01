@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"math"
 	"sync"
 
 	"bernard/discord"
@@ -28,6 +29,79 @@ type session struct {
 	turnMu  sync.Mutex
 	running bool
 	pending []discord.Message
+
+	// lastPrompt* are the most recent priced prompt: its unitSize and the
+	// tokens the provider charged for it. Guarded by mu.
+	lastPromptBytes  int
+	lastPromptTokens int
+	// trimmed* are what the last append evicted, for that turn's log line.
+	// Guarded by mu.
+	trimmedUnits int
+	trimmedBytes int
+}
+
+// Token estimation mirrors Reasonix's tokPerChar: one sample from the last
+// turn's real usage, no smoothing and no history, accepted only if plausible,
+// with a fallback until any sample exists. Their bounds and fallback verbatim.
+//
+// Their name says chars, but they sum len() on strings, so the denominator is
+// bytes — the same measure as unitSize.
+const (
+	fallbackTokPerByte = 0.25
+	minTokPerByte      = 0.05
+	maxTokPerByte      = 2.0
+)
+
+// contextTier names the escalation Reasonix would run at this prompt size,
+// or "" below the first one. Reporting only; nothing acts on it yet.
+func contextTier(promptTokens int) string {
+	switch {
+	case promptTokens >= int(contextWindow*forceRatio):
+		return "force"
+	case promptTokens >= int(contextWindow*compactRatio):
+		return "compact"
+	case promptTokens >= int(contextWindow*snipRatio):
+		return "snip"
+	case promptTokens >= int(contextWindow*softRatio):
+		return "soft"
+	}
+	return ""
+}
+
+// contextPct is the share of the window a prompt used, as a percentage.
+func contextPct(promptTokens int) float64 {
+	return round3(float64(promptTokens) * 100 / contextWindow)
+}
+
+func round3(f float64) float64 { return math.Round(f*1000) / 1000 }
+
+// observe records what the last call sent and what it cost. A failed run
+// carries no measurement — the loop discards its result — and zeroes would
+// throw away the last good sample, so only a real pair is kept.
+// Caller must hold s.mu.
+func (s *session) observe(promptBytes, promptTokens int) {
+	if promptBytes <= 0 || promptTokens <= 0 {
+		return
+	}
+	s.lastPromptBytes, s.lastPromptTokens = promptBytes, promptTokens
+}
+
+// tokPerByte converts a unitSize into tokens, for sizing history before any
+// call has priced it. An implausible ratio means the measurement is broken,
+// so it is discarded rather than used.
+//
+// Reasonix divides the last call's PromptTokens by the session's *current*
+// size, so numerator and denominator come from different moments. Recording
+// both from the same call costs one int and removes that drift.
+// Caller must hold s.mu.
+func (s *session) tokPerByte() float64 {
+	if s.lastPromptBytes > 0 && s.lastPromptTokens > 0 {
+		r := float64(s.lastPromptTokens) / float64(s.lastPromptBytes)
+		if r > minTokPerByte && r < maxTokPerByte {
+			return r
+		}
+	}
+	return fallbackTokPerByte
 }
 
 // claim takes the floor for one turn. When a turn already holds it, msg joins
@@ -117,6 +191,17 @@ func (s *session) finish() (discord.Message, bool) {
 	return newest, true
 }
 
+// size is the session's total unitSize, the quantity sessionBudget trims
+// against. Reported so the approach to that budget is visible before it
+// fires. Caller must hold s.mu.
+func (s *session) size() int {
+	total := 0
+	for _, u := range s.units {
+		total += unitSize(u)
+	}
+	return total
+}
+
 // history flattens the units into the message list sent to the LLM.
 // Caller must hold s.mu.
 func (s *session) history() []llm.Message {
@@ -127,31 +212,38 @@ func (s *session) history() []llm.Message {
 	return msgs
 }
 
-// append adds one turn's messages as a unit and trims to budget.
+// append adds one turn's messages as a unit and trims to budget. What the
+// trim cost is kept for the turn's log line: an eviction is otherwise only
+// visible by diffing consecutive turns, which is no way to verify that a
+// change stopped it happening.
 // Caller must hold s.mu.
 func (s *session) append(unit []llm.Message) {
 	if len(unit) == 0 {
 		return
 	}
-	s.units = trimUnits(append(s.units, unit), sessionBudget, sessionFloor)
+	s.units, s.trimmedUnits, s.trimmedBytes = trimUnits(append(s.units, unit), sessionBudget, sessionFloor)
 }
 
 // trimUnits drops oldest units until the total size is at or under floor —
 // but only when the total exceeds budget (hysteresis: rare, big trims), and
-// never the newest unit, even if it alone exceeds the floor.
-func trimUnits(units [][]llm.Message, budget, floor int) [][]llm.Message {
+// never the newest unit, even if it alone exceeds the floor. Returns what it
+// dropped.
+func trimUnits(units [][]llm.Message, budget, floor int) (kept [][]llm.Message, dropped, droppedBytes int) {
 	total := 0
 	for _, u := range units {
 		total += unitSize(u)
 	}
 	if total <= budget {
-		return units
+		return units, 0, 0
 	}
 	for len(units) > 1 && total > floor {
-		total -= unitSize(units[0])
+		size := unitSize(units[0])
+		total -= size
+		droppedBytes += size
+		dropped++
 		units = units[1:]
 	}
-	return units
+	return units, dropped, droppedBytes
 }
 
 // unitSize approximates a unit's share of the prompt: every string the wire

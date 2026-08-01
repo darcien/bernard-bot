@@ -15,6 +15,7 @@ import (
 
 	"bernard/discord"
 	"bernard/llm"
+	"bernard/logid"
 	"bernard/tools"
 )
 
@@ -164,6 +165,9 @@ func (s *Service) answer(msg discord.Message, question string) string {
 	sess := s.sessionFor(msg.ChannelID)
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
+	// Per-turn, so a failed turn (which commits nothing) doesn't report the
+	// previous turn's eviction as its own.
+	sess.trimmedUnits, sess.trimmedBytes = 0, 0
 
 	// The triggering message is usually in the fetch too; it enters the
 	// prompt as the current turn instead.
@@ -172,6 +176,9 @@ func (s *Service) answer(msg discord.Message, question string) string {
 	current := userMessage(msg.Author.Username, question)
 	ctx, cancel := context.WithTimeout(s.ctx, turnTimeout)
 	defer cancel()
+	// Everything the loop logs from here down carries the triggering message
+	// ID, so concurrent turns stay separable in the log.
+	ctx = logid.With(ctx, msg.ID)
 
 	// Mentions arriving mid-turn are folded into this run instead of costing
 	// a follow-up turn. The loop takes a plain function, so it stays free of
@@ -239,6 +246,10 @@ func (s *Service) answer(msg discord.Message, question string) string {
 		}
 	}
 
+	// A failed run returns an empty result, so there is nothing to record
+	// and observe ignores it rather than discarding the last good sample.
+	sess.observe(res.lastPromptBytes, res.lastPromptTokens)
+
 	s.logAnswer(msg, sess, res, reply, len(delta), cited, time.Since(start), err)
 	return reply
 }
@@ -247,9 +258,11 @@ func (s *Service) answer(msg discord.Message, question string) string {
 // describe the happy path are omitted — their presence is the signal.
 func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, reply string, synced, cited int, dur time.Duration, err error) {
 	attrs := []any{
+		"turn", msg.ID,
 		"channel", msg.ChannelID,
 		"user", msg.Author.Username,
 		"history", len(sess.units),
+		"session_bytes", sess.size(),
 		"rounds", res.rounds,
 		"prompt_tokens", res.usage.PromptTokens,
 		"cache_hit_tokens", res.usage.CacheHitTokens,
@@ -265,6 +278,24 @@ func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, 
 	}
 	if res.steers > 0 {
 		attrs = append(attrs, "steers", res.steers)
+	}
+	// Context pressure: what the largest prompt measured and cost, the share
+	// of the window it used, the ratio between them, and the escalation tier
+	// it would have hit. prompt_bytes is here because it is the denominator
+	// of tok_per_byte — without it the ratio can't be checked, and neither
+	// can the gap against session_bytes, which counts history alone.
+	// Nothing acts on these yet — see docs/plan-context.md.
+	attrs = append(attrs,
+		"prompt_bytes", res.lastPromptBytes,
+		"ctx_pct", contextPct(res.lastPromptTokens),
+		"tok_per_byte", round3(sess.tokPerByte()))
+	if t := contextTier(res.lastPromptTokens); t != "" {
+		attrs = append(attrs, "tier", t)
+	}
+	// Eviction, named at the moment it happens rather than left to be
+	// inferred from history falling between two turns.
+	if sess.trimmedUnits > 0 {
+		attrs = append(attrs, "trimmed_units", sess.trimmedUnits, "trimmed_bytes", sess.trimmedBytes)
 	}
 	if len(res.sources) > 0 {
 		// cited < sources means the model ignored its citation markers and

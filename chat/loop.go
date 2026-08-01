@@ -35,6 +35,13 @@ type loopResult struct {
 	steers    int       // mid-turn messages folded into this run
 	usage     llm.Usage // last call's finish reason, totals across calls
 	grace     bool
+	// lastPrompt* describe the last prompt this run sent — and so the biggest,
+	// since msgs only grows within a turn: its unitSize and what the provider
+	// charged for it. The pair drives the context ratio and the per-session
+	// token calibration, so both must come from the same call to mean
+	// anything together. Zero on a failed run, which returns no result.
+	lastPromptBytes  int
+	lastPromptTokens int
 	// sources are the places tool output came from, in citation order:
 	// sources[0] is "[1]". Recorded by the harness, never by the model, so
 	// a citation can't name a page that was never fetched.
@@ -68,6 +75,12 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 		res.produced = append(res.produced, m)
 		res.steers++
 	}
+	// priced records what one call sent and what it cost, overwriting each
+	// round so the pair describes the last (largest) prompt.
+	priced := func(sent int, u llm.Usage) {
+		res.lastPromptBytes = sent
+		res.lastPromptTokens = u.PromptTokens
+	}
 	accrue := func(u llm.Usage) {
 		res.usage.FinishReason = u.FinishReason
 		res.usage.PromptTokens += u.PromptTokens
@@ -77,10 +90,12 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 
 	for range maxToolRounds {
 		res.rounds++
+		sent := unitSize(msgs)
 		m, usage, err := client.Chat(ctx, msgs, reg.Schemas())
 		if err != nil {
 			return loopResult{}, err
 		}
+		priced(sent, usage)
 		accrue(usage)
 		record(m)
 		if len(m.ToolCalls) == 0 {
@@ -115,10 +130,13 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 	}
 	res.grace = true
 	res.rounds++
-	m, usage, err := client.Chat(ctx, append(msgs, llm.Message{Role: "user", Content: graceNudge}), nil)
+	graced := append(msgs, llm.Message{Role: "user", Content: graceNudge})
+	sent := unitSize(graced)
+	m, usage, err := client.Chat(ctx, graced, nil)
 	if err != nil {
 		return loopResult{}, err
 	}
+	priced(sent, usage)
 	accrue(usage)
 	res.produced = append(res.produced, m)
 	res.reply = m.Content

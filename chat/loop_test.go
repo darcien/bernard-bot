@@ -200,6 +200,46 @@ func TestRunToolLoop_SteerKeepsToolCallPairing(t *testing.T) {
 	}
 }
 
+// The reported prompt size is the last call's, not the first or the sum: a
+// later round carries the tool results, so it is the one that measures the
+// session against the window.
+func TestRunToolLoop_ReportsTheLastPromptSize(t *testing.T) {
+	round := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		round++
+		if round == 1 {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"",
+				"tool_calls":[{"id":"c1","type":"function","function":{"name":"probe","arguments":"{}"}}]}}],
+				"usage":{"prompt_tokens":100}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"done"}}],
+			"usage":{"prompt_tokens":900}}`))
+	}))
+	defer srv.Close()
+
+	reg := tools.NewRegistry(toolResultCap, &loopTool{})
+	client := llm.NewClient(srv.URL, "k", "m")
+	prompt := []llm.Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u: go"}}
+
+	res, err := runToolLoop(context.Background(), client, reg, prompt, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res.lastPromptTokens != 900 {
+		t.Errorf("want the last call's tokens, got %d", res.lastPromptTokens)
+	}
+	if res.usage.PromptTokens != 1000 {
+		t.Errorf("want the sum kept for cost accounting, got %d", res.usage.PromptTokens)
+	}
+	// Paired with the same call: the second prompt carries the tool result,
+	// so it must measure larger than the first.
+	if res.lastPromptBytes <= unitSize(prompt) {
+		t.Errorf("want the grown prompt measured, got %d", res.lastPromptBytes)
+	}
+}
+
 const wantsToolReply = `{"choices":[{"message":{"role":"assistant","content":"",
 	"tool_calls":[{"id":"c1","type":"function","function":{"name":"probe","arguments":"{}"}}]}}]}`
 

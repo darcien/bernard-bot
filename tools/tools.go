@@ -13,6 +13,8 @@ import (
 	"sort"
 	"time"
 	"unicode/utf8"
+
+	"bernard/logid"
 )
 
 type Tool interface {
@@ -101,7 +103,7 @@ func (r *Registry) Execute(ctx context.Context, name, args string) (result, sour
 	}
 	t, ok := r.byName[name]
 	if !ok {
-		slog.Debug("tool call", "name", name, "err", "unknown tool")
+		slog.Debug("tool call", append([]any{"name", name, "err", "unknown tool"}, logid.Attrs(ctx)...)...)
 		return "error: unknown tool " + name, ""
 	}
 
@@ -111,7 +113,7 @@ func (r *Registry) Execute(ctx context.Context, name, args string) (result, sour
 	if err != nil {
 		// The model's arguments are the thing worth seeing when a tool
 		// misbehaves — that's its decision, not user content.
-		slog.Debug("tool call", "name", name, "args", TruncateRunes(args, 200), "dur", dur, "err", err)
+		slog.Debug("tool call", append([]any{"name", name, "args", TruncateRunes(args, 200), "dur", dur, "err", err}, logid.Attrs(ctx)...)...)
 		return "error: " + err.Error(), ""
 	}
 
@@ -126,7 +128,7 @@ func (r *Registry) Execute(ctx context.Context, name, args string) (result, sour
 	if len(result) != len(out) {
 		attrs = append(attrs, "truncated_from", len(out))
 	}
-	slog.Debug("tool call", attrs...)
+	slog.Debug("tool call", append(attrs, logid.Attrs(ctx)...)...)
 	return result, source
 }
 

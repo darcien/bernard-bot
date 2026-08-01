@@ -190,28 +190,108 @@ func TestSession_RequeueDoesNotDisplaceANewerArrival(t *testing.T) {
 	}
 }
 
+// The ratio is the last observation, used raw — no smoothing, no history.
+func TestSession_TokPerByteUsesTheLastObservation(t *testing.T) {
+	sess := &session{}
+	if got := sess.tokPerByte(); got != fallbackTokPerByte {
+		t.Fatalf("want the fallback before any call, got %v", got)
+	}
+
+	sess.observe(1000, 320)
+	if got := sess.tokPerByte(); got != 0.32 {
+		t.Errorf("want the sample used whole, got %v", got)
+	}
+
+	sess.observe(1000, 420)
+	if got := sess.tokPerByte(); got != 0.42 {
+		t.Errorf("want the newest sample, not an average, got %v", got)
+	}
+}
+
+// A failed turn returns an empty loopResult, so it observes zeros. Those must
+// not evict a good sample — a failure arrives when the session is largest,
+// which is exactly when the ratio is about to matter.
+func TestSession_ObserveKeepsTheLastGoodSample(t *testing.T) {
+	sess := &session{}
+	sess.observe(1000, 320)
+	sess.observe(0, 0)
+	if got := sess.tokPerByte(); got != 0.32 {
+		t.Errorf("want the last good sample kept, got %v", got)
+	}
+}
+
+// An implausible ratio means the measurement is broken, so the fallback
+// stands rather than a nonsense number propagating into tail sizing.
+func TestSession_TokPerByteRejectsNonsense(t *testing.T) {
+	cases := []struct {
+		name          string
+		bytes, tokens int
+	}{
+		{"no bytes", 0, 100},
+		{"no tokens", 1000, 0},
+		{"denser than two tokens per byte", 100, 900},
+		{"impossibly sparse", 100000, 10},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sess := &session{}
+			sess.observe(tc.bytes, tc.tokens)
+			if got := sess.tokPerByte(); got != fallbackTokPerByte {
+				t.Errorf("want the fallback, got %v", got)
+			}
+		})
+	}
+}
+
+// Tiers name the escalation Reasonix would run; below the first one there is
+// nothing to report.
+func TestContextTier(t *testing.T) {
+	cases := []struct {
+		tokens int
+		want   string
+	}{
+		{0, ""},
+		{contextWindow*softRatio - 1, ""},
+		{contextWindow * softRatio, "soft"},
+		{contextWindow * snipRatio, "snip"},
+		{contextWindow * compactRatio, "compact"},
+		{contextWindow * forceRatio, "force"},
+		{contextWindow, "force"},
+	}
+	for _, tc := range cases {
+		if got := contextTier(tc.tokens); got != tc.want {
+			t.Errorf("%d tokens: got %q, want %q", tc.tokens, got, tc.want)
+		}
+	}
+}
+
 func TestTrimUnits(t *testing.T) {
 	t.Run("under budget stays untouched", func(t *testing.T) {
 		units := [][]llm.Message{textUnit(10), textUnit(10)}
-		if got := trimUnits(units, 100, 50); len(got) != 2 {
-			t.Errorf("want 2 units, got %d", len(got))
+		got, dropped, bytes := trimUnits(units, 100, 50)
+		if len(got) != 2 || dropped != 0 || bytes != 0 {
+			t.Errorf("want 2 units and no trim, got %d units, dropped %d (%d bytes)", len(got), dropped, bytes)
 		}
 	})
 
 	t.Run("over budget drops oldest until under floor", func(t *testing.T) {
 		units := [][]llm.Message{textUnit(40), textUnit(40), textUnit(40)}
-		got := trimUnits(units, 100, 50) // total 120+roles > 100
+		got, dropped, bytes := trimUnits(units, 100, 50) // total 120+roles > 100
 		if len(got) != 1 {
 			t.Fatalf("want 1 unit left, got %d", len(got))
 		}
 		if got[0][0].Content != units[2][0].Content {
 			t.Error("want newest unit kept, oldest dropped")
 		}
+		// The report is what the turn's log line claims was evicted.
+		if dropped != 2 || bytes != unitSize(units[0])+unitSize(units[1]) {
+			t.Errorf("want 2 units reported dropped with their bytes, got %d (%d bytes)", dropped, bytes)
+		}
 	})
 
 	t.Run("newest unit survives even alone over the floor", func(t *testing.T) {
 		units := [][]llm.Message{textUnit(10), textUnit(500)}
-		got := trimUnits(units, 100, 50)
+		got, _, _ := trimUnits(units, 100, 50)
 		if len(got) != 1 || len(got[0][0].Content) != 500 {
 			t.Errorf("want only the oversized newest unit kept, got %d units", len(got))
 		}

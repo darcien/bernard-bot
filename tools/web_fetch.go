@@ -13,9 +13,19 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"bernard/logid"
 )
 
 const webFetchBodyLimit = 1 << 20 // 1MB of raw body is plenty for text
+
+// A fetch is "thin" when a substantial page yields text worth a fraction of a
+// percent of it. Article HTML lands well above this even after boilerplate is
+// stripped; a JS shell lands far below.
+const (
+	thinExtractMinBytes = 50_000
+	thinExtractRatio    = 100 // text × this < body bytes
+)
 
 // acceptHeader ranks representations of the *same* URL. These weights only
 // decide anything when a server offers several — most pages have one, which
@@ -160,7 +170,14 @@ func (f *WebFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if len(body) == webFetchBodyLimit {
 		attrs = append(attrs, "body_limit_hit", true)
 	}
-	slog.Debug("web fetch", attrs...)
+	// A big page that extracts to almost nothing is a JS-rendered site, not a
+	// short page — and nothing was truncated, so dropped_chars stays absent
+	// and the two look identical. The model answers from the scraps either
+	// way; this is the only thing that says which happened.
+	if len(body) >= thinExtractMinBytes && len(content)*thinExtractRatio < len(body) {
+		attrs = append(attrs, "thin", true)
+	}
+	slog.Debug("web fetch", append(attrs, logid.Attrs(ctx)...)...)
 	return text, nil
 }
 
