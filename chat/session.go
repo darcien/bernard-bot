@@ -27,29 +27,63 @@ type session struct {
 
 	turnMu  sync.Mutex
 	running bool
-	pending *discord.Message
+	pending []discord.Message
 }
 
-// claim takes the floor for one turn. When a turn already holds it, msg is
-// recorded as the waiting mention instead and false is returned — the caller
-// must not start a turn, because the running one will collect this mention
-// when it finishes.
-//
-// Newest wins, decided by snowflake rather than by arrival: each mention is
-// handled on its own goroutine, so the order they reach this lock is not the
-// order they were sent. A displaced mention is not lost — it is still a
-// channel message and rides the next turn's delta.
+// claim takes the floor for one turn. When a turn already holds it, msg joins
+// the mentions waiting on that turn and false is returned — the caller must
+// not start a turn, because the running one will take this mention either
+// mid-flight (steer) or as its follow-up (finish).
 func (s *session) claim(msg discord.Message) bool {
 	s.turnMu.Lock()
 	defer s.turnMu.Unlock()
 	if s.running {
-		if s.pending == nil || snowflake(msg.ID) > snowflake(s.pending.ID) {
-			s.pending = &msg
-		}
+		s.queue(msg)
 		return false
 	}
 	s.running = true
 	return true
+}
+
+// queue records a mention waiting on the running turn. Every waiting mention
+// is kept rather than only the newest: the commit folds steered IDs into the
+// watermark, so a mention that was silently displaced would end up behind the
+// watermark without ever having reached the model.
+//
+// Past pendingCap the oldest is dropped, which is safe for the same reason in
+// reverse — a dropped mention was never steered, so the watermark never
+// passes it and the next turn's gap sync still carries it.
+//
+// Caller holds turnMu.
+func (s *session) queue(msg discord.Message) {
+	s.pending = append(s.pending, msg)
+	if len(s.pending) > pendingCap {
+		s.pending = s.pending[1:]
+	}
+}
+
+// steer takes the next waiting mention for the running turn to fold in
+// mid-flight, oldest first, keeping the floor: the turn is absorbing the
+// message rather than ending.
+func (s *session) steer() (discord.Message, bool) {
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+	if len(s.pending) == 0 {
+		return discord.Message{}, false
+	}
+	msg := s.pending[0]
+	s.pending = s.pending[1:]
+	return msg, true
+}
+
+// requeue puts a steered mention back when its turn produced nothing. Without
+// it a mention absorbed by a turn that then failed would be answered by
+// nobody: it is no longer waiting, so finish hands back nothing and no
+// follow-up turn runs.
+func (s *session) requeue(msg discord.Message) {
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+	s.queue(msg)
 }
 
 // finish ends a turn, handing back the mention that arrived during it if
@@ -61,16 +95,26 @@ func (s *session) claim(msg discord.Message) bool {
 // It is called on turn *exit*, not on commit: a turn that failed still has to
 // hand off, or every mention that arrived while it was failing goes
 // unanswered.
+// The follow-up turn takes the newest waiting mention as its question,
+// decided by snowflake rather than by arrival: each mention is handled on its
+// own goroutine, so the order they reach this lock is not the order they were
+// sent. The older ones ride that turn's delta — the watermark never passed
+// them.
 func (s *session) finish() (discord.Message, bool) {
 	s.turnMu.Lock()
 	defer s.turnMu.Unlock()
-	if s.pending == nil {
+	if len(s.pending) == 0 {
 		s.running = false
 		return discord.Message{}, false
 	}
-	msg := *s.pending
+	newest := s.pending[0]
+	for _, msg := range s.pending[1:] {
+		if snowflake(msg.ID) > snowflake(newest.ID) {
+			newest = msg
+		}
+	}
 	s.pending = nil
-	return msg, true
+	return newest, true
 }
 
 // history flattens the units into the message list sent to the LLM.

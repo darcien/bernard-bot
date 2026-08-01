@@ -204,7 +204,7 @@ func waitForPending(t *testing.T, sess *session, id string) {
 	waitFor(t, func() bool {
 		sess.turnMu.Lock()
 		defer sess.turnMu.Unlock()
-		return sess.pending != nil && sess.pending.ID == id
+		return len(sess.pending) > 0 && sess.pending[len(sess.pending)-1].ID == id
 	})
 }
 
@@ -319,6 +319,180 @@ func TestHandleMention_DisplacedMentionArrivesViaTheGapSync(t *testing.T) {
 	}
 	if !strings.Contains(bodies[1], "budi: and that") {
 		t.Error("waiting mention missing as the follow-up question")
+	}
+}
+
+// callsTool is a canned assistant reply that calls current_time, so a turn
+// runs more than one round and has a mid-turn injection point.
+const callsTool = `{"choices":[{"message":{"role":"assistant","content":"",
+	"tool_calls":[{"id":"c1","type":"function","function":{"name":"current_time","arguments":"{}"}}]}}]}`
+
+// A mention arriving while a turn works is folded into that turn instead of
+// costing a follow-up: one reply, and the watermark covers the steered
+// message so the next gap sync doesn't serve it again.
+func TestHandleMention_SteersMidTurnMentionIntoTheRunningTurn(t *testing.T) {
+	var replies []string
+	fakeDiscord(t, &replies, "")
+
+	var bodies []string
+	var mu sync.Mutex
+	var calls atomic.Int32
+	release := make(chan struct{})
+	s := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		mu.Unlock()
+		if calls.Add(1) == 1 {
+			<-release // hold the first round open so a mention can land
+			_, _ = w.Write([]byte(callsTool))
+			return
+		}
+		_, _ = w.Write([]byte(finalReply("ok")))
+	})
+
+	s.HandleMention(mentionMsg())
+	waitFor(t, func() bool { return calls.Load() == 1 })
+
+	steered := mentionMsg()
+	steered.ID, steered.Content = "10", "<@app123> make it short"
+	steered.Author = discord.User{ID: "u2", Username: "budi"}
+	s.HandleMention(steered)
+	waitForPending(t, s.sessionFor("chan-mention"), "10")
+
+	close(release)
+	if !s.Wait(5 * time.Second) {
+		t.Fatal("background task did not finish")
+	}
+
+	if len(replies) != 1 {
+		t.Errorf("want one reply covering both mentions, got %v", replies)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 {
+		t.Fatalf("want 2 rounds in one turn, got %d", len(bodies))
+	}
+	if !strings.Contains(bodies[1], "budi: make it short") {
+		t.Error("steered mention missing from the second round")
+	}
+	if !strings.Contains(bodies[1], steerPrefix) {
+		t.Error("want the steered mention marked as mid-turn guidance")
+	}
+	sess := s.sessionFor("chan-mention")
+	if sess.lastSeenID != "10" {
+		t.Errorf("want the watermark past the steered mention, got %q", sess.lastSeenID)
+	}
+}
+
+// A mention that queues before the turn's sync runs is already carried by the
+// delta, so steering it again would put the same question in the prompt
+// twice. The window is real: the sync happens after the floor is claimed.
+func TestHandleMention_MentionQueuedBeforeSyncIsNotSteeredTwice(t *testing.T) {
+	var bodies []string
+	var mu sync.Mutex
+	var calls atomic.Int32
+	syncing := make(chan struct{})
+	release := make(chan struct{})
+
+	history := `[{"id":"10","content":"<@app123> and this","author":{"id":"u2","username":"budi"}}]`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			close(syncing)
+			<-release // hold the sync open so a mention can queue first
+			_, _ = w.Write([]byte(history))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	orig := discord.DiscordAPIBase
+	discord.DiscordAPIBase = srv.URL
+	t.Cleanup(func() { discord.DiscordAPIBase = orig })
+
+	s := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		mu.Unlock()
+		if calls.Add(1) == 1 {
+			_, _ = w.Write([]byte(callsTool))
+			return
+		}
+		_, _ = w.Write([]byte(finalReply("ok")))
+	})
+
+	s.HandleMention(mentionMsg())
+	<-syncing
+
+	queued := mentionMsg()
+	queued.ID, queued.Content = "10", "<@app123> and this"
+	queued.Author = discord.User{ID: "u2", Username: "budi"}
+	s.HandleMention(queued)
+	waitForPending(t, s.sessionFor("chan-mention"), "10")
+
+	close(release)
+	if !s.Wait(5 * time.Second) {
+		t.Fatal("background task did not finish")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 {
+		t.Fatalf("want 2 rounds, got %d", len(bodies))
+	}
+	if n := strings.Count(bodies[1], "and this"); n != 1 {
+		t.Errorf("want the queued mention in the prompt once, got %d", n)
+	}
+	if strings.Contains(bodies[1], steerPrefix) {
+		t.Error("want no steer marker for a mention the delta already carried")
+	}
+	sess := s.sessionFor("chan-mention")
+	if sess.lastSeenID != "10" {
+		t.Errorf("want the watermark past it, got %q", sess.lastSeenID)
+	}
+}
+
+// A turn that absorbs a mention and then fails commits nothing, so the
+// mention it took is owed an answer by nobody — it goes back on the queue and
+// the follow-up turn serves it.
+func TestHandleMention_SteeredMentionRequeuedWhenTheTurnFails(t *testing.T) {
+	var replies []string
+	fakeDiscord(t, &replies, "")
+
+	var calls atomic.Int32
+	release := make(chan struct{})
+	s := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		switch calls.Add(1) {
+		case 1:
+			<-release
+			_, _ = w.Write([]byte(callsTool))
+		case 2:
+			http.Error(w, "boom", http.StatusInternalServerError)
+		default:
+			_, _ = w.Write([]byte(finalReply("ok")))
+		}
+	})
+
+	s.HandleMention(mentionMsg())
+	waitFor(t, func() bool { return calls.Load() == 1 })
+
+	steered := mentionMsg()
+	steered.ID, steered.Content = "10", "<@app123> make it short"
+	s.HandleMention(steered)
+	waitForPending(t, s.sessionFor("chan-mention"), "10")
+
+	close(release)
+	if !s.Wait(5 * time.Second) {
+		t.Fatal("background task did not finish")
+	}
+
+	if len(replies) != 2 {
+		t.Fatalf("want the failure reported and the steered mention served, got %v", replies)
+	}
+	if !strings.Contains(replies[0], "error bro") {
+		t.Errorf("want the failed turn to say so, got %q", replies[0])
+	}
+	if replies[1] != "ok" {
+		t.Errorf("want the requeued mention answered, got %q", replies[1])
 	}
 }
 

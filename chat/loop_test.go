@@ -54,7 +54,7 @@ func TestRunToolLoop_NumbersSources(t *testing.T) {
 	client := llm.NewClient(srv.URL, "k", "m")
 	prompt := []llm.Message{{Role: "user", Content: "u: go"}}
 
-	res, err := runToolLoop(context.Background(), client, reg, prompt)
+	res, err := runToolLoop(context.Background(), client, reg, prompt, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +93,113 @@ func (l *loopTool) Execute(context.Context, json.RawMessage) (string, error) {
 	return "probed", nil
 }
 
+// A message that arrives mid-turn is folded into the run after the round's
+// tool results, so the model reads it without a second turn. It reaches the
+// model marked as guidance and reaches history plain — the marker is
+// transport, not something the next turn should read back as conversation.
+func TestRunToolLoop_SteersMidTurnMessageIntoTheRun(t *testing.T) {
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, string(body))
+		if len(requests) == 1 {
+			_, _ = w.Write([]byte(wantsToolReply))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"done"}}]}`))
+	}))
+	defer srv.Close()
+
+	reg := tools.NewRegistry(toolResultCap, &loopTool{})
+	client := llm.NewClient(srv.URL, "k", "m")
+	prompt := []llm.Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u: go"}}
+
+	steers := 0
+	steer := func() (llm.Message, bool) {
+		steers++
+		if steers > 1 {
+			return llm.Message{}, false // only one message was waiting
+		}
+		return llm.Message{Role: "user", Content: "budi: make it short"}, true
+	}
+
+	res, err := runToolLoop(context.Background(), client, reg, prompt, steer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res.steers != 1 || res.rounds != 2 {
+		t.Errorf("want one steer folded into two rounds, got %+v", res)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("want 2 LLM calls, got %d", len(requests))
+	}
+	if !strings.Contains(requests[1], steerPrefix) {
+		t.Error("want the mid-turn message marked as guidance for the model")
+	}
+	if !strings.Contains(requests[1], "make it short") {
+		t.Error("want the mid-turn message in the next round's prompt")
+	}
+
+	var found bool
+	for _, m := range res.produced {
+		if strings.Contains(m.Content, steerPrefix) {
+			t.Error("want the marker kept out of history")
+		}
+		if m.Role == "user" && m.Content == "budi: make it short" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("want the plain mid-turn message committed to history")
+	}
+}
+
+// The injection point is after the round's tool results, so every tool_call
+// still has its answer — DeepSeek 400s on a pair split by another message.
+func TestRunToolLoop_SteerKeepsToolCallPairing(t *testing.T) {
+	round := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		round++
+		if round == 1 {
+			_, _ = w.Write([]byte(wantsToolReply))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"done"}}]}`))
+	}))
+	defer srv.Close()
+
+	reg := tools.NewRegistry(toolResultCap, &loopTool{})
+	client := llm.NewClient(srv.URL, "k", "m")
+	prompt := []llm.Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u: go"}}
+
+	once := true
+	res, err := runToolLoop(context.Background(), client, reg, prompt, func() (llm.Message, bool) {
+		if !once {
+			return llm.Message{}, false
+		}
+		once = false
+		return llm.Message{Role: "user", Content: "budi: also this"}, true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Every assistant tool_call must be followed by its tool result before
+	// anything else appears.
+	for i, m := range res.produced {
+		if len(m.ToolCalls) == 0 {
+			continue
+		}
+		for j, call := range m.ToolCalls {
+			next := res.produced[i+1+j]
+			if next.Role != "tool" || next.ToolCallID != call.ID {
+				t.Fatalf("tool_call %q not answered in place: %+v", call.ID, next)
+			}
+		}
+	}
+}
+
 const wantsToolReply = `{"choices":[{"message":{"role":"assistant","content":"",
 	"tool_calls":[{"id":"c1","type":"function","function":{"name":"probe","arguments":"{}"}}]}}]}`
 
@@ -117,7 +224,7 @@ func TestRunToolLoop_GraceRound(t *testing.T) {
 	client := llm.NewClient(srv.URL, "k", "m")
 	prompt := []llm.Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u: go"}}
 
-	res, err := runToolLoop(context.Background(), client, reg, prompt)
+	res, err := runToolLoop(context.Background(), client, reg, prompt, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

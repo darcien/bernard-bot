@@ -173,8 +173,30 @@ func (s *Service) answer(msg discord.Message, question string) string {
 	ctx, cancel := context.WithTimeout(s.ctx, turnTimeout)
 	defer cancel()
 
+	// Mentions arriving mid-turn are folded into this run instead of costing
+	// a follow-up turn. The loop takes a plain function, so it stays free of
+	// Discord and session concepts; the IDs are kept here because only the
+	// commit below knows what to do with them.
+	var steered []discord.Message
+	steer := func() (llm.Message, bool) {
+		next, ok := sess.steer()
+		if !ok {
+			return llm.Message{}, false
+		}
+		// Tracked either way: the commit folds these into the watermark and
+		// the error path hands them back.
+		steered = append(steered, next)
+		if snowflake(next.ID) <= snowflake(seenID) {
+			// Already swept into this turn's delta by the sync above — it
+			// queued before the sync ran. Folding it in again would put the
+			// same question in the prompt twice.
+			return llm.Message{}, false
+		}
+		return userMessage(next.Author.Username, stripMention(next.Content, s.botID)), true
+	}
+
 	prompt := buildContext(systemPrompt, "", append(sess.history(), delta...), current)
-	res, err := runToolLoop(ctx, s.llm, s.tools, prompt)
+	res, err := runToolLoop(ctx, s.llm, s.tools, prompt, steer)
 	reply := res.reply
 	cited := 0
 	switch {
@@ -202,6 +224,19 @@ func (s *Service) answer(msg discord.Message, question string) string {
 		sess.append(append(unit, res.produced...))
 		sess.synced = true
 		sess.lastSeenID = maxSnowflake(seenID, msg.ID)
+		// Steered mentions were answered by this turn, so the watermark has
+		// to cover them too — otherwise the next gap sync refetches them and
+		// the model reads the same question twice.
+		for _, sm := range steered {
+			sess.lastSeenID = maxSnowflake(sess.lastSeenID, sm.ID)
+		}
+	}
+	if err != nil {
+		// Nothing committed, so a mention this turn absorbed is now owed an
+		// answer by no one. Put it back for the follow-up turn.
+		for _, sm := range steered {
+			sess.requeue(sm)
+		}
 	}
 
 	s.logAnswer(msg, sess, res, reply, len(delta), cited, time.Since(start), err)
@@ -227,6 +262,9 @@ func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, 
 	}
 	if res.toolCalls > 0 {
 		attrs = append(attrs, "tools", res.toolCalls)
+	}
+	if res.steers > 0 {
+		attrs = append(attrs, "steers", res.steers)
 	}
 	if len(res.sources) > 0 {
 		// cited < sources means the model ignored its citation markers and

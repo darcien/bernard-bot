@@ -29,6 +29,10 @@ const (
 	// purpose — a question that waited longer than this has been overtaken by
 	// the conversation, and a late answer is worse than an honest refusal.
 	admissionWait = 60 * time.Second
+	// pendingCap bounds the mentions waiting on one running turn. Small
+	// because Discord holds them anyway: dropping the oldest costs nothing,
+	// since the watermark never passed it and the next gap sync refetches it.
+	pendingCap = 8
 	// typingInterval re-fires the typing indicator; Discord expires it at
 	// ~10s and turns routinely outlive that.
 	typingInterval   = 8 * time.Second
