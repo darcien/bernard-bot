@@ -54,6 +54,9 @@ func (a *admission) enter(ctx context.Context, wait time.Duration) error {
 func (a *admission) leave() { <-a.slots }
 
 // keepTyping shows "Bernard is typing..." until the returned stop is called.
+// stop ends the ticker, not the request in flight: a TriggerTyping already
+// under way runs to its own timeout. Harmless — the indicator expires on its
+// own — but it means stop is not preemptive.
 // Discord expires the indicator after ~10s while a turn can run for a minute,
 // so it re-fires on a ticker. It starts before admission, not after: a
 // mention waiting for a slot has not begun any work, and one indicator that

@@ -100,10 +100,37 @@ func (s *Service) HandleMention(msg discord.Message) bool {
 		case question == "":
 			s.reply(msg.ChannelID, emptyAskReply)
 		default:
-			s.reply(msg.ChannelID, s.runTurn(msg, question))
+			s.serve(msg, question)
 		}
 	})
 	return true
+}
+
+// serve answers a mention and every mention that arrives while it works.
+//
+// Only one turn per channel ever runs: a mention landing mid-turn is recorded
+// and collected here on exit, so N impatient mentions cost one follow-up turn
+// rather than N turns. The collected turn re-syncs the channel, so the
+// mentions it did not take as the current question are still in its prompt as
+// ordinary delta — Discord is the queue, and this is only the bit that says
+// something is waiting in it.
+//
+// A mention with an empty question never reaches here, so a waiting mention
+// always has one.
+func (s *Service) serve(msg discord.Message, question string) {
+	sess := s.sessionFor(msg.ChannelID)
+	if !sess.claim(msg) {
+		slog.Debug("chat mention queued", "channel", msg.ChannelID, "user", msg.Author.Username)
+		return
+	}
+	for {
+		s.reply(msg.ChannelID, s.runTurn(msg, question))
+		next, ok := sess.finish()
+		if !ok {
+			return
+		}
+		msg, question = next, stripMention(next.Content, s.botID)
+	}
 }
 
 // runTurn answers one mention under admission. The typing indicator

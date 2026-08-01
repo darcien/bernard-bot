@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -192,6 +194,173 @@ func TestHandleMention_RestartingWhenShutdownBeatsAdmission(t *testing.T) {
 	}
 	if len(replies) != 1 || replies[0] != restartingReply {
 		t.Errorf("got %q, want %q", replies, restartingReply)
+	}
+}
+
+// waitForPending blocks until the channel's waiting mention is the given ID,
+// so a test can be sure a mention was queued rather than racing to run.
+func waitForPending(t *testing.T, sess *session, id string) {
+	t.Helper()
+	waitFor(t, func() bool {
+		sess.turnMu.Lock()
+		defer sess.turnMu.Unlock()
+		return sess.pending != nil && sess.pending.ID == id
+	})
+}
+
+// Mentions arriving while a turn works are collected into one follow-up turn
+// instead of each starting their own: three mentions, two turns.
+func TestHandleMention_CollectsMentionsArrivingMidTurn(t *testing.T) {
+	var replies []string
+	fakeDiscord(t, &replies, "")
+
+	var calls atomic.Int32
+	release := make(chan struct{})
+	s := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			<-release // hold the first turn open while more mentions land
+		}
+		_, _ = w.Write([]byte(finalReply("ok")))
+	})
+
+	s.HandleMention(mentionMsg())
+	waitFor(t, func() bool { return calls.Load() == 1 })
+
+	sess := s.sessionFor("chan-mention")
+	for _, id := range []string{"10", "11"} {
+		msg := mentionMsg()
+		msg.ID = id
+		s.HandleMention(msg)
+		waitForPending(t, sess, id)
+	}
+
+	close(release)
+	if !s.Wait(5 * time.Second) {
+		t.Fatal("background task did not finish")
+	}
+
+	if got := calls.Load(); got != 2 {
+		t.Errorf("want 2 turns for 3 mentions, got %d", got)
+	}
+	if len(replies) != 2 {
+		t.Errorf("want 2 replies, got %v", replies)
+	}
+}
+
+// The mention that "newest wins" displaced is not lost: it is still a channel
+// message, so the follow-up turn's gap sync puts it in the prompt. This is
+// the safety net the whole collect design rests on — without it, dropping the
+// older mention from pending really would drop the question.
+func TestHandleMention_DisplacedMentionArrivesViaTheGapSync(t *testing.T) {
+	var bodies []string
+	var mu sync.Mutex
+	var calls atomic.Int32
+	release := make(chan struct{})
+
+	// Discord: nothing on the initial sync, both later mentions on the gap
+	// sync, so anything found in the second prompt got there via the delta.
+	gap := `[{"id":"10","content":"<@app123> and this","author":{"id":"u2","username":"budi"}},
+	         {"id":"11","content":"<@app123> and that","author":{"id":"u2","username":"budi"}}]`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if strings.Contains(r.URL.RawQuery, "after=") {
+				_, _ = w.Write([]byte(gap))
+				return
+			}
+			_, _ = w.Write([]byte("[]"))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	orig := discord.DiscordAPIBase
+	discord.DiscordAPIBase = srv.URL
+	t.Cleanup(func() { discord.DiscordAPIBase = orig })
+
+	s := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		mu.Unlock()
+		if calls.Add(1) == 1 {
+			<-release
+		}
+		_, _ = w.Write([]byte(finalReply("ok")))
+	})
+
+	s.HandleMention(mentionMsg())
+	waitFor(t, func() bool { return calls.Load() == 1 })
+
+	sess := s.sessionFor("chan-mention")
+	for _, m := range []struct{ id, text string }{{"10", "and this"}, {"11", "and that"}} {
+		msg := mentionMsg()
+		msg.ID = m.id
+		msg.Content = "<@app123> " + m.text
+		msg.Author = discord.User{ID: "u2", Username: "budi"}
+		s.HandleMention(msg)
+		waitForPending(t, sess, m.id)
+	}
+
+	close(release)
+	if !s.Wait(5 * time.Second) {
+		t.Fatal("background task did not finish")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 {
+		t.Fatalf("want 2 turns, got %d", len(bodies))
+	}
+	if strings.Contains(bodies[0], "and this") {
+		t.Fatal("setup wrong: the displaced mention must not be in the first prompt")
+	}
+	// The delta keeps the raw channel text, mention token and all; only the
+	// current question is stripped.
+	if !strings.Contains(bodies[1], "and this") {
+		t.Error("displaced mention missing from the follow-up prompt")
+	}
+	if !strings.Contains(bodies[1], "budi: and that") {
+		t.Error("waiting mention missing as the follow-up question")
+	}
+}
+
+// The hand-off happens on turn exit, not on commit: a turn that fails still
+// has to collect what arrived while it was failing, or those mentions are
+// answered by nobody.
+func TestHandleMention_CollectedMentionRunsAfterAFailedTurn(t *testing.T) {
+	var replies []string
+	fakeDiscord(t, &replies, "")
+
+	var calls atomic.Int32
+	release := make(chan struct{})
+	s := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			<-release
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(finalReply("ok")))
+	})
+
+	s.HandleMention(mentionMsg())
+	waitFor(t, func() bool { return calls.Load() == 1 })
+
+	waiting := mentionMsg()
+	waiting.ID = "10"
+	s.HandleMention(waiting)
+	waitForPending(t, s.sessionFor("chan-mention"), "10")
+
+	close(release)
+	if !s.Wait(5 * time.Second) {
+		t.Fatal("background task did not finish")
+	}
+
+	if len(replies) != 2 {
+		t.Fatalf("want the failed turn answered and the waiting one served, got %v", replies)
+	}
+	if !strings.Contains(replies[0], "error bro") {
+		t.Errorf("want the first turn to report its failure, got %q", replies[0])
+	}
+	if replies[1] != "ok" {
+		t.Errorf("want the collected mention answered, got %q", replies[1])
 	}
 }
 
