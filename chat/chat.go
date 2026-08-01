@@ -122,6 +122,7 @@ func (s *Service) answer(msg discord.Message, question string) string {
 	prompt := buildContext(systemPrompt, "", append(sess.history(), delta...), current)
 	res, err := runToolLoop(ctx, s.llm, s.tools, prompt)
 	reply := res.reply
+	cited := 0
 	switch {
 	case errors.Is(err, context.Canceled):
 		reply = restartingReply
@@ -133,6 +134,11 @@ func (s *Service) answer(msg discord.Message, question string) string {
 		if reply == "" {
 			reply = noAnswerReply
 		}
+		// Sources are rendered from the harness's record, not from whatever
+		// URL the model may have typed. The session keeps the bare reply —
+		// the footer is presentation, and repeating it in history would
+		// teach the model to write footers itself.
+		reply, cited = withSources(reply, res.sources)
 		// Commit only on success: an unanswered question in history would
 		// get re-answered next time, and a failed round could leave a
 		// dangling tool_call pair (DeepSeek 400s on those). The channel
@@ -144,13 +150,13 @@ func (s *Service) answer(msg discord.Message, question string) string {
 		sess.lastSeenID = maxSnowflake(seenID, msg.ID)
 	}
 
-	s.logAnswer(msg, sess, res, reply, len(delta), time.Since(start), err)
+	s.logAnswer(msg, sess, res, reply, len(delta), cited, time.Since(start), err)
 	return reply
 }
 
 // logAnswer emits the one line per conversation turn. Fields that only
 // describe the happy path are omitted — their presence is the signal.
-func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, reply string, synced int, dur time.Duration, err error) {
+func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, reply string, synced, cited int, dur time.Duration, err error) {
 	attrs := []any{
 		"channel", msg.ChannelID,
 		"user", msg.Author.Username,
@@ -167,6 +173,11 @@ func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, 
 	}
 	if res.toolCalls > 0 {
 		attrs = append(attrs, "tools", res.toolCalls)
+	}
+	if len(res.sources) > 0 {
+		// cited < sources means the model ignored its citation markers and
+		// the footer fell back to listing everything.
+		attrs = append(attrs, "sources", len(res.sources), "cited", cited)
 	}
 	if res.grace {
 		attrs = append(attrs, "grace", true)

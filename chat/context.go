@@ -2,8 +2,10 @@ package chat
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"bernard/discord"
 	"bernard/llm"
@@ -37,6 +39,39 @@ func buildContext(systemPrompt, memory string, history []llm.Message, current ll
 // Same shape as the bootstrap transcript lines.
 func userMessage(username, content string) llm.Message {
 	return llm.Message{Role: "user", Content: username + ": " + content}
+}
+
+// withSources appends a footer for the pages this turn actually read, and
+// reports how many the reply cited. The URLs come from the harness's own
+// record, so a `[1]` can only ever resolve to a page that was really
+// fetched, and a citation number with no matching source is dropped rather
+// than guessed at.
+//
+// When the model cites nothing, the footer lists every source unnumbered
+// instead of vanishing: the pages were read either way, and provenance
+// shouldn't depend on the model remembering to ask for it.
+//
+// URLs are wrapped in <> to suppress Discord's link previews; several
+// sources would otherwise bury the answer under embed cards.
+func withSources(reply string, sources []string) (string, int) {
+	var footer strings.Builder
+	cited := 0
+	for i, source := range sources {
+		if !strings.Contains(reply, fmt.Sprintf("[%d]", i+1)) {
+			continue
+		}
+		cited++
+		fmt.Fprintf(&footer, "\n[%d] <%s>", i+1, source)
+	}
+	if cited == 0 {
+		for _, source := range sources {
+			fmt.Fprintf(&footer, "\n<%s>", source)
+		}
+	}
+	if footer.Len() == 0 {
+		return reply, 0
+	}
+	return reply + "\n" + footer.String(), cited
 }
 
 // channelDelta maps fetched channel messages to history turns, oldest

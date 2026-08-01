@@ -52,17 +52,17 @@ func TestRegistry_Execute(t *testing.T) {
 	r := NewRegistry(100, boom, noargs)
 
 	t.Run("unknown tool becomes error text", func(t *testing.T) {
-		if got := r.Execute(context.Background(), "nope", "{}"); got != "error: unknown tool nope" {
+		if got, _ := r.Execute(context.Background(), "nope", "{}"); got != "error: unknown tool nope" {
 			t.Errorf("got %q", got)
 		}
 	})
 	t.Run("tool error becomes error text", func(t *testing.T) {
-		if got := r.Execute(context.Background(), "boom", "{}"); got != "error: kaput" {
+		if got, _ := r.Execute(context.Background(), "boom", "{}"); got != "error: kaput" {
 			t.Errorf("got %q", got)
 		}
 	})
 	t.Run("empty args normalized to {} so tools can unmarshal", func(t *testing.T) {
-		if got := r.Execute(context.Background(), "noargs", ""); got != "ok" {
+		if got, _ := r.Execute(context.Background(), "noargs", ""); got != "ok" {
 			t.Errorf("got %q", got)
 		}
 		if noargs.gotArgs != "{}" {
@@ -71,11 +71,34 @@ func TestRegistry_Execute(t *testing.T) {
 	})
 }
 
+// A tool that implements Sourced reports where its output came from, but
+// only when the call actually succeeded — a failed fetch cites nothing.
+type sourcedTool struct{ fakeTool }
+
+func (s *sourcedTool) Source(json.RawMessage) string { return "https://example.com/page" }
+
+func TestRegistry_ExecuteReportsSource(t *testing.T) {
+	ok := &sourcedTool{fakeTool{name: "fetch", result: "page text"}}
+	broken := &sourcedTool{fakeTool{name: "broken", err: errors.New("404")}}
+	plain := &fakeTool{name: "plain", result: "no source here"}
+	r := NewRegistry(100, ok, broken, plain)
+
+	if _, source := r.Execute(context.Background(), "fetch", "{}"); source != "https://example.com/page" {
+		t.Errorf("want the tool's source, got %q", source)
+	}
+	if _, source := r.Execute(context.Background(), "broken", "{}"); source != "" {
+		t.Errorf("want no source from a failed call, got %q", source)
+	}
+	if _, source := r.Execute(context.Background(), "plain", "{}"); source != "" {
+		t.Errorf("want no source from a tool that isn't Sourced, got %q", source)
+	}
+}
+
 func TestRegistry_ExecuteCapsResult(t *testing.T) {
 	long := &fakeTool{name: "long", result: strings.Repeat("a", 50)}
 	r := NewRegistry(10, long)
 
-	got := r.Execute(context.Background(), "long", "{}")
+	got, _ := r.Execute(context.Background(), "long", "{}")
 	if !strings.HasSuffix(got, "[truncated]") || !strings.HasPrefix(got, "aaaaaaaaaa") {
 		t.Errorf("want capped result with marker, got %q", got)
 	}

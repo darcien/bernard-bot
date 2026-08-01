@@ -22,6 +22,14 @@ type Tool interface {
 	Execute(ctx context.Context, args json.RawMessage) (string, error)
 }
 
+// Sourced is implemented by tools whose output comes from a citable place.
+// The caller numbers the sources and renders them; the tool only says where
+// the content came from, so a citation can never name a page that was never
+// fetched.
+type Sourced interface {
+	Source(args json.RawMessage) string
+}
+
 type Registry struct {
 	byName    map[string]Tool
 	names     []string // sorted; schema order and the startup log line
@@ -83,16 +91,18 @@ func (r *Registry) Schemas() json.RawMessage { return r.schemas }
 // Names returns the registered tool names, sorted.
 func (r *Registry) Names() []string { return slices.Clone(r.names) }
 
-// Execute runs a named tool. Failures come back as result text ("error: ...")
-// so the model can react; the tool loop never aborts on a tool error.
-func (r *Registry) Execute(ctx context.Context, name, args string) string {
+// Execute runs a named tool and returns its result text plus the source it
+// came from, if any (see Sourced). Failures come back as result text
+// ("error: ...") so the model can react; the tool loop never aborts on a
+// tool error.
+func (r *Registry) Execute(ctx context.Context, name, args string) (result, source string) {
 	if args == "" {
 		args = "{}" // some gateways send "" for no-arg calls
 	}
 	t, ok := r.byName[name]
 	if !ok {
 		slog.Debug("tool call", "name", name, "err", "unknown tool")
-		return "error: unknown tool " + name
+		return "error: unknown tool " + name, ""
 	}
 
 	start := time.Now()
@@ -102,16 +112,22 @@ func (r *Registry) Execute(ctx context.Context, name, args string) string {
 		// The model's arguments are the thing worth seeing when a tool
 		// misbehaves — that's its decision, not user content.
 		slog.Debug("tool call", "name", name, "args", TruncateRunes(args, 200), "dur", dur, "err", err)
-		return "error: " + err.Error()
+		return "error: " + err.Error(), ""
 	}
 
-	result := TruncateRunes(out, r.resultCap)
+	// Only a successful call cites a source; a failed fetch has nothing to
+	// point at.
+	if s, ok := t.(Sourced); ok {
+		source = s.Source(json.RawMessage(args))
+	}
+
+	result = TruncateRunes(out, r.resultCap)
 	attrs := []any{"name", name, "args", TruncateRunes(args, 200), "dur", dur, "chars", len(result)}
 	if len(result) != len(out) {
 		attrs = append(attrs, "truncated_from", len(out))
 	}
 	slog.Debug("tool call", attrs...)
-	return result
+	return result, source
 }
 
 // TruncateRunes caps s at max runes, cutting on a rune boundary (a byte

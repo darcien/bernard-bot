@@ -50,6 +50,16 @@ func TestWebFetch_ErrorOnBadStatus(t *testing.T) {
 	}
 }
 
+func TestWebFetch_Source(t *testing.T) {
+	f := newTestFetch()
+	if got := f.Source(fetchArgs("https://example.com/x")); got != "https://example.com/x" {
+		t.Errorf("want the requested URL, got %q", got)
+	}
+	if got := f.Source(json.RawMessage(`not json`)); got != "" {
+		t.Errorf("want no source for malformed args, got %q", got)
+	}
+}
+
 func TestWebFetch_RefusesNonHTTPSchemes(t *testing.T) {
 	for _, u := range []string{"file:///etc/passwd", "ftp://example.com", "not a url", ""} {
 		if _, err := newTestFetch().Execute(context.Background(), fetchArgs(u)); err == nil {

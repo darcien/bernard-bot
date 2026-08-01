@@ -72,6 +72,17 @@ func (f *WebFetch) Schema() json.RawMessage {
 	}`)
 }
 
+// Source reports the URL the model asked for, so the reply can cite it.
+func (f *WebFetch) Source(args json.RawMessage) string {
+	var params struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return ""
+	}
+	return params.URL
+}
+
 func (f *WebFetch) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var params struct {
 		URL string `json:"url"`

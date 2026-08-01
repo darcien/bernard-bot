@@ -33,6 +33,63 @@ func TestBuildContext(t *testing.T) {
 	})
 }
 
+func TestWithSources(t *testing.T) {
+	sources := []string{"https://a.example", "https://b.example"}
+
+	t.Run("only cited sources are numbered", func(t *testing.T) {
+		got, cited := withSources("the sheep are asleep [2]", sources)
+		if cited != 1 {
+			t.Errorf("want 1 citation counted, got %d", cited)
+		}
+		if strings.Contains(got, "a.example") {
+			t.Errorf("want uncited source omitted, got %q", got)
+		}
+		if !strings.Contains(got, "[2] <https://b.example>") {
+			t.Errorf("want cited source in the footer, got %q", got)
+		}
+	})
+
+	// The model forgetting its markers must not erase provenance: the pages
+	// were read either way.
+	t.Run("no citations falls back to listing every source", func(t *testing.T) {
+		got, cited := withSources("just chatting", sources)
+		if cited != 0 {
+			t.Errorf("want 0 citations counted, got %d", cited)
+		}
+		for _, source := range sources {
+			if !strings.Contains(got, "<"+source+">") {
+				t.Errorf("want %q listed, got %q", source, got)
+			}
+		}
+		if strings.Contains(got, "[1]") {
+			t.Errorf("want the fallback list unnumbered, got %q", got)
+		}
+	})
+
+	t.Run("no sources means no footer", func(t *testing.T) {
+		got, cited := withSources("just chatting", nil)
+		if got != "just chatting" || cited != 0 {
+			t.Errorf("want the reply untouched, got %q", got)
+		}
+	})
+
+	t.Run("a citation with no source is dropped, not guessed", func(t *testing.T) {
+		got, _ := withSources("wild claim [3]", sources)
+		if strings.Contains(got, "[3]") && strings.Contains(got, "[3] <") {
+			t.Errorf("want no footer entry for an unknown citation, got %q", got)
+		}
+	})
+
+	// Angle brackets suppress Discord's link previews, which would
+	// otherwise bury a short answer under embed cards.
+	t.Run("urls are wrapped to suppress previews", func(t *testing.T) {
+		got, _ := withSources("cited [1]", sources[:1])
+		if !strings.Contains(got, "<https://a.example>") {
+			t.Errorf("want the URL wrapped in angle brackets, got %q", got)
+		}
+	})
+}
+
 func TestChannelDelta(t *testing.T) {
 	// Newest first, as the Discord API returns them.
 	msgs := []discord.Message{

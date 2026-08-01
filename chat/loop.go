@@ -21,6 +21,20 @@ type loopResult struct {
 	toolCalls int
 	usage     llm.Usage // last call's finish reason, totals across calls
 	grace     bool
+	// sources are the places tool output came from, in citation order:
+	// sources[0] is "[1]". Recorded by the harness, never by the model, so
+	// a citation can't name a page that was never fetched.
+	sources []string
+}
+
+// cite returns the citation number for a source, reusing the number if the
+// same place was consulted twice in one turn.
+func (r *loopResult) cite(source string) int {
+	if i := slices.Index(r.sources, source); i >= 0 {
+		return i + 1
+	}
+	r.sources = append(r.sources, source)
+	return len(r.sources)
 }
 
 // runToolLoop drives rounds of completion + tool execution until the model
@@ -54,7 +68,12 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 		}
 		for _, call := range m.ToolCalls {
 			res.toolCalls++
-			result := reg.Execute(ctx, call.Function.Name, call.Function.Arguments)
+			result, source := reg.Execute(ctx, call.Function.Name, call.Function.Arguments)
+			if source != "" {
+				// Hand the model the citation number along with the
+				// content, so it can cite without inventing a URL.
+				result = fmt.Sprintf("[%d] source: %s\n\n%s", res.cite(source), source, result)
+			}
 			record(llm.Message{Role: "tool", Content: result, ToolCallID: call.ID})
 		}
 	}
