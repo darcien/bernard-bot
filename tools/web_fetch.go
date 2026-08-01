@@ -5,24 +5,38 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 )
 
 const webFetchBodyLimit = 1 << 20 // 1MB of raw body is plenty for text
 
-var (
-	rgxScriptStyle = regexp.MustCompile(`(?is)<(script|style)\b.*?</(script|style)>`)
-	rgxTag         = regexp.MustCompile(`<[^>]*>`)
-	rgxWhitespace  = regexp.MustCompile(`\s+`)
-)
+// acceptHeader ranks representations of the *same* URL. These weights only
+// decide anything when a server offers several — most pages have one, which
+// it sends regardless — and the trailing wildcard means we never provoke a
+// 406.
+//
+// The reader here is a model, not a person: anyone who wanted the page as
+// rendered would open the link themselves. So rank by how much of the
+// response is content rather than markup, worst last:
+//
+//   - markdown: the same page converted at the origin, nav and scripts
+//     already stripped (Cloudflare's "Markdown for Agents" and similar).
+//   - json: structured and chrome-free. Discourse, WordPress and most CMSes
+//     serve the post body as JSON for the very same URL.
+//   - plain text: no markup to undo, just unstructured.
+//   - html last: needs converting, and most of what arrives is furniture.
+const acceptHeader = "text/markdown," +
+	"application/json;q=0.9," +
+	"text/plain;q=0.8," +
+	"text/html;q=0.7,application/xhtml+xml;q=0.7," +
+	"*/*;q=0.5"
 
 // WebFetch fetches a URL and returns its text content. Any Discord user can
 // point it at an arbitrary URL, so it refuses non-http(s) schemes and
@@ -101,6 +115,7 @@ func (f *WebFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", err
 	}
 	req.Header.Set("User-Agent", "bernard-bot (+https://github.com/darcien/bernard-bot)")
+	req.Header.Set("Accept", acceptHeader)
 
 	start := time.Now()
 	resp, err := f.client.Do(req)
@@ -121,14 +136,18 @@ func (f *WebFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", errors.New("binary content, not text")
 	}
 
-	text := TruncateHeadTail(htmlToText(string(body)), f.resultCap)
+	contentType := resp.Header.Get("Content-Type")
+	content, format := readable(string(body), contentType)
+	text := TruncateHeadTail(content, f.resultCap)
+
 	// Transport facts only — what the tool layer can't see: where the
-	// request actually landed after redirects, and how much of the page
-	// survived stripping and truncation.
+	// request actually landed after redirects, which representation the
+	// server gave us, and how much survived conversion and truncation.
 	attrs := []any{
 		"url", resp.Request.URL.String(), // post-redirect
 		"status", resp.StatusCode,
-		"type", resp.Header.Get("Content-Type"),
+		"type", contentType,
+		"format", format,
 		"bytes", len(body),
 		"text_chars", len(text),
 		"dur", time.Since(start).Round(time.Millisecond),
@@ -138,6 +157,40 @@ func (f *WebFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 	}
 	slog.Debug("web fetch", attrs...)
 	return text, nil
+}
+
+// readable turns a response body into text for the model, and names the
+// path taken. Markdown and plain text arrive usable — running them through
+// an HTML parser would only mangle them (a JSON API answer is not markup).
+// HTML is converted; anything unlabelled is sniffed, since servers do
+// mislabel content type.
+func readable(body, contentType string) (content, format string) {
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+	switch {
+	case mediaType == "text/markdown":
+		return strings.TrimSpace(body), "markdown"
+	case mediaType == "text/html", mediaType == "application/xhtml+xml":
+		return htmlToText(body), "html"
+	case mediaType != "":
+		return strings.TrimSpace(body), "text"
+	case looksLikeHTML(body):
+		return htmlToText(body), "html"
+	default:
+		return strings.TrimSpace(body), "text"
+	}
+}
+
+// looksLikeHTML sniffs an unlabelled body the way a browser would: check
+// only the start, where a doctype or root tag lives.
+func looksLikeHTML(body string) bool {
+	head := strings.ToLower(strings.TrimSpace(body))
+	if len(head) > 512 {
+		head = head[:512]
+	}
+	return strings.HasPrefix(head, "<!doctype html") ||
+		strings.HasPrefix(head, "<html") ||
+		strings.Contains(head, "<head") ||
+		strings.Contains(head, "<body")
 }
 
 // dialVetted resolves the host, filters the candidate IPs, and dials vetted
@@ -170,21 +223,17 @@ func (f *WebFetch) dialVetted(ctx context.Context, network, addr string) (net.Co
 	return nil, fmt.Errorf("blocked: %s resolves to a private or local address", host)
 }
 
+// cgnat is the carrier-grade NAT range, which some clouds use for their
+// metadata service.
+var cgnat = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
 // blockedIP refuses loopback, private LAN, link-local (includes the cloud
-// metadata address 169.254.169.254), and unspecified addresses.
+// metadata address 169.254.169.254), CGNAT, and unspecified addresses.
 func blockedIP(ip net.IP) bool {
 	return ip.IsLoopback() ||
 		ip.IsPrivate() ||
 		ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() ||
-		ip.IsUnspecified()
-}
-
-// htmlToText strips markup down to readable text. Crude by design: drop
-// script/style blocks, drop tags, decode entities, collapse whitespace.
-func htmlToText(s string) string {
-	s = rgxScriptStyle.ReplaceAllString(s, " ")
-	s = rgxTag.ReplaceAllString(s, " ")
-	s = html.UnescapeString(s)
-	return strings.TrimSpace(rgxWhitespace.ReplaceAllString(s, " "))
+		ip.IsUnspecified() ||
+		cgnat.Contains(ip)
 }

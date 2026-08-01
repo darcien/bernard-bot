@@ -22,7 +22,7 @@ func fetchArgs(url string) json.RawMessage {
 	return args
 }
 
-func TestWebFetch_StripsHTMLToText(t *testing.T) {
+func TestWebFetch_RendersPageAsText(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<html><head><style>body{color:red}</style><script>alert(1)</script></head>
 			<body><h1>Sheep &amp; Wool</h1><p>are  great</p></body></html>`)
@@ -33,8 +33,8 @@ func TestWebFetch_StripsHTMLToText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "Sheep & Wool are great" {
-		t.Errorf("want stripped text, got %q", got)
+	if got != "# Sheep & Wool\n\nare great" {
+		t.Errorf("want headings kept and entities decoded, got %q", got)
 	}
 }
 
@@ -47,6 +47,71 @@ func TestWebFetch_ErrorOnBadStatus(t *testing.T) {
 	_, err := newTestFetch().Execute(context.Background(), fetchArgs(srv.URL))
 	if err == nil || !strings.Contains(err.Error(), "403") {
 		t.Errorf("want HTTP 403 error, got %v", err)
+	}
+}
+
+// Markdown and JSON arrive usable; only HTML needs converting, and running
+// the others through the HTML parser would mangle them.
+func TestReadable(t *testing.T) {
+	cases := []struct {
+		name, body, contentType, wantFormat, wantContent string
+	}{
+		{"negotiated markdown", "# Title\n\n- point", "text/markdown; charset=utf-8", "markdown", "# Title\n\n- point"},
+		{"html converted", "<html><body><p>hi</p></body></html>", "text/html; charset=utf-8", "html", "hi"},
+		{"json left alone", `{"a": "<b>"}`, "application/json", "text", `{"a": "<b>"}`},
+		{"plain text left alone", "just words", "text/plain", "text", "just words"},
+		{"unlabelled html is sniffed", "<!DOCTYPE html><html><body><p>hi</p></body></html>", "", "html", "hi"},
+		{"unlabelled text is not", "just words", "", "text", "just words"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content, format := readable(tc.body, tc.contentType)
+			if format != tc.wantFormat {
+				t.Errorf("want format %q, got %q", tc.wantFormat, format)
+			}
+			if content != tc.wantContent {
+				t.Errorf("want content %q, got %q", tc.wantContent, content)
+			}
+		})
+	}
+}
+
+func TestWebFetch_RequestsMarkdownFirst(t *testing.T) {
+	var accept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accept = r.Header.Get("Accept")
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		fmt.Fprint(w, "# Sheep\n\nthey are fine")
+	}))
+	defer srv.Close()
+
+	got, err := newTestFetch().Execute(context.Background(), fetchArgs(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ranking matters only when a URL has several representations, but the
+	// order must stay deliberate: the reader is a model, so prefer whatever
+	// is mostly content, and take HTML — mostly furniture — last.
+	if !strings.HasPrefix(accept, "text/markdown") {
+		t.Errorf("want markdown preferred in Accept, got %q", accept)
+	}
+	for _, pair := range [][2]string{
+		{"text/markdown", "application/json"},
+		{"application/json", "text/plain"},
+		{"text/plain", "text/html"},
+		{"text/html", "*/*"},
+	} {
+		if strings.Index(accept, pair[0]) > strings.Index(accept, pair[1]) {
+			t.Errorf("want %s ranked above %s, got %q", pair[0], pair[1], accept)
+		}
+	}
+	// A tie hands the choice to the server. html and xhtml are allowed to
+	// share one: they're the same representation in two spellings.
+	if strings.Count(accept, "q=0.9") > 1 || strings.Count(accept, "q=0.8") > 1 {
+		t.Errorf("want no ties between types we rank differently, got %q", accept)
+	}
+	if got != "# Sheep\n\nthey are fine" {
+		t.Errorf("want negotiated markdown passed through untouched, got %q", got)
 	}
 }
 
