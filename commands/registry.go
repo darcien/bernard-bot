@@ -24,7 +24,6 @@ var registry = map[string]Handler{
 	"e25n":       handleE25n,
 	"http":       handleHTTP,
 	"workaholic": handleWorkaholic,
-	"chat":       handleChat,
 }
 
 // Dispatch looks up and calls the handler for the given command.

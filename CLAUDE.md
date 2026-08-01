@@ -38,12 +38,6 @@ Deferred responses: `/chat` returns `DeferredChannelMessageWithSource` immediate
 
 LLM (`llm/client.go`): stdlib-only client for any OpenAI-compatible chat completions endpoint, configured via env. `/chat` goes offline (joke reply) when LLM env vars are unset.
 
-## Environment variables
-
-See `.env.example`. Required: `DISCORD_APPLICATION_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`.
-Optional: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` (defaults to `deepseek-v4-flash`) — `/chat` is offline when base URL or key is unset.
-The `justfile` loads `.env` automatically via `set dotenv-load`.
-
 ## Notes
 
 - `/remind` is currently disabled and not implemented.

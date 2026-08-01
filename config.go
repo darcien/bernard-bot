@@ -4,7 +4,9 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 )
 
 func loadServer() (*server, error) {
@@ -46,5 +48,22 @@ func loadServer() (*server, error) {
 		llmBaseURL:    os.Getenv("LLM_BASE_URL"),
 		llmAPIKey:     os.Getenv("LLM_API_KEY"),
 		llmModel:      llmModel,
+		logLevel:      logLevel(os.Getenv("LOG_LEVEL")),
 	}, nil
+}
+
+// logLevel maps LOG_LEVEL to a slog level. Debug is the default: at this
+// bot's volume the per-step detail costs nothing, and a missing line means
+// debugging by restart-and-hope.
+func logLevel(s string) slog.Level {
+	switch strings.ToLower(s) {
+	case "info":
+		return slog.LevelInfo
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelDebug
+	}
 }

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -76,5 +77,74 @@ func TestComplete_NoChoices(t *testing.T) {
 	}
 	if reply != "" {
 		t.Errorf("want empty reply, got %q", reply)
+	}
+}
+
+func captureServer(t *testing.T, rawBody *string, response string) *Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		*rawBody = string(body)
+		_, _ = w.Write([]byte(response))
+	}))
+	t.Cleanup(srv.Close)
+	return NewClient(srv.URL, "k", "test-model")
+}
+
+func TestChat_ToolCallRoundTrip(t *testing.T) {
+	var rawBody string
+	c := captureServer(t, &rawBody, `{"choices":[{"message":{
+		"role":"assistant","content":"",
+		"tool_calls":[{"id":"call_1","type":"function","function":{"name":"current_time","arguments":"{}"}}]
+	}}]}`)
+
+	tools := json.RawMessage(`[{"type":"function","function":{"name":"current_time"}}]`)
+	m, _, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "what time"}}, tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(rawBody, `"tools":[{"type":"function"`) {
+		t.Errorf("want tools array in request, got %s", rawBody)
+	}
+	if len(m.ToolCalls) != 1 || m.ToolCalls[0].Function.Name != "current_time" || m.ToolCalls[0].ID != "call_1" {
+		t.Errorf("want parsed tool call, got %+v", m.ToolCalls)
+	}
+}
+
+func TestChat_NilToolsOmitted(t *testing.T) {
+	var rawBody string
+	c := captureServer(t, &rawBody, `{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`)
+
+	if _, _, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rawBody, `"tools"`) {
+		t.Errorf("want no tools field when nil, got %s", rawBody)
+	}
+	if !strings.Contains(rawBody, `"max_tokens":2048`) {
+		t.Errorf("want explicit max_tokens (provider defaults cut replies), got %s", rawBody)
+	}
+}
+
+// DeepSeek's strict deserializer rejects a message missing the content
+// field, so even an assistant message carrying only tool calls must
+// serialize "content":"".
+func TestChat_ContentFieldAlwaysPresent(t *testing.T) {
+	var rawBody string
+	c := captureServer(t, &rawBody, `{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`)
+
+	msgs := []Message{
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_1", Type: "function", Function: FunctionCall{Name: "t", Arguments: "{}"}}}},
+		{Role: "tool", Content: "result", ToolCallID: "call_1"},
+	}
+	if _, _, err := c.Chat(context.Background(), msgs, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rawBody, `"content":""`) {
+		t.Errorf("want empty content field serialized, got %s", rawBody)
+	}
+	if !strings.Contains(rawBody, `"tool_call_id":"call_1"`) {
+		t.Errorf("want tool_call_id serialized, got %s", rawBody)
 	}
 }

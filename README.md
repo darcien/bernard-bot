@@ -75,10 +75,13 @@ Scopes:
 - `bot` - makes the bot a guild member, so REST API calls with the bot token work
 - `applications.commands` - registers slash commands in the server
 
-Bot permissions, both needed by `/workaholic check` to read past messages in the
-channel it runs in:
-- View Channels, under General Permissions
-- Read Message History, under Text Permissions
+Bot permissions:
+- View Channels, under General Permissions - `/workaholic check` and chat
+  channel sync
+- Read Message History, under Text Permissions - `/workaholic check`, and the
+  chat harness fetching channel history
+- Send Messages, under Text Permissions - @mention replies and the typing
+  indicator
 
 Under Bot → Privileged Gateway Intents:
 - Server Members Intent - `/workaholic check` lists guild members to resolve

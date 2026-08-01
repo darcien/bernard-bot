@@ -48,11 +48,25 @@ func fetchAsBot(url string) ([]byte, error) {
 		return nil, err
 	}
 
-	slog.Info("discord API", "url", url, "status", resp.StatusCode, "dur", dur)
+	slog.Debug("discord API", "url", url, "status", resp.StatusCode, "dur", dur)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("discord API %d: %s", resp.StatusCode, string(body))
 	}
 	return body, nil
+}
+
+// messagePayload builds a message body: JSON when the content fits the
+// message limit, otherwise a markdown attachment. Shared by followups and
+// channel posts.
+func messagePayload(content string) (contentType string, payload []byte) {
+	if utf16Len(content) > maxMessageLength {
+		payloadJSON, _ := json.Marshal(MessageResponseData{
+			Attachments: []Attachment{{ID: 0, Filename: "response.md"}},
+		})
+		return multipartAttachment(payloadJSON, content)
+	}
+	payload, _ = json.Marshal(MessageResponseData{Content: content})
+	return "application/json", payload
 }
 
 // CreateFollowupMessage posts a followup message for a deferred interaction
@@ -62,26 +76,18 @@ func fetchAsBot(url string) ([]byte, error) {
 // https://discord.com/developers/docs/interactions/receiving-and-responding#followup-messages
 func CreateFollowupMessage(applicationID, interactionToken, content string) error {
 	url := fmt.Sprintf("%s/webhooks/%s/%s", DiscordAPIBase, applicationID, interactionToken)
+	contentType, payload := messagePayload(content)
 
-	var contentType string
-	var body []byte
-	if utf16Len(content) > maxMessageLength {
-		payloadJSON, _ := json.Marshal(MessageResponseData{
-			Attachments: []Attachment{{ID: 0, Filename: "response.md"}},
-		})
-		contentType, body = multipartAttachment(payloadJSON, content)
-	} else {
-		body, _ = json.Marshal(MessageResponseData{Content: content})
-		contentType = "application/json"
-	}
-
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", fmt.Sprintf("DiscordBot (%s)", repoURL))
 	req.Header.Set("Content-Type", contentType)
 
+	// Logs say "followup" instead of the real URL on purpose: the webhook
+	// URL embeds the interaction token (it IS the auth), and tokens don't
+	// belong in logs.
 	start := time.Now()
 	resp, err := apiClient.Do(req)
 	dur := time.Since(start)
@@ -96,9 +102,72 @@ func CreateFollowupMessage(applicationID, interactionToken, content string) erro
 		return err
 	}
 
-	slog.Info("discord API", "url", "followup", "status", resp.StatusCode, "dur", dur)
+	slog.Debug("discord API", "url", "followup", "status", resp.StatusCode, "dur", dur)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("discord API %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// GetMessagesAfter returns channel messages with IDs after afterID. Used to
+// sync messages sent between chat invocations into the conversation history.
+// Note the ordering trap: unlike a plain fetch, Discord returns ?after=
+// results oldest-first, so callers must not assume a position means newest.
+func GetMessagesAfter(channelID, afterID string, limit int) ([]Message, error) {
+	url := fmt.Sprintf("%s/channels/%s/messages?after=%s&limit=%d", DiscordAPIBase, channelID, afterID, limit)
+	body, err := fetchAsBot(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch messages after %s from channel %s: %w", afterID, channelID, err)
+	}
+	var messages []Message
+	if err := json.Unmarshal(body, &messages); err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
+
+// CreateMessage posts a plain message to a channel as the bot (the mention
+// reply path — no interaction token involved). Long content becomes a
+// markdown attachment via the shared payload builder.
+// https://discord.com/developers/docs/resources/message#create-message
+func CreateMessage(channelID, content string) error {
+	url := fmt.Sprintf("%s/channels/%s/messages", DiscordAPIBase, channelID)
+	contentType, payload := messagePayload(content)
+	return postAsBot(url, contentType, payload)
+}
+
+// TriggerTyping shows "Bernard is typing..." in the channel for ~10s.
+// Best effort — callers ignore failures.
+func TriggerTyping(channelID string) error {
+	url := fmt.Sprintf("%s/channels/%s/typing", DiscordAPIBase, channelID)
+	return postAsBot(url, "application/json", nil)
+}
+
+func postAsBot(url, contentType string, payload []byte) error {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", fmt.Sprintf("DiscordBot (%s)", repoURL))
+	req.Header.Set("Authorization", "Bot "+botToken)
+	req.Header.Set("Content-Type", contentType)
+
+	start := time.Now()
+	resp, err := apiClient.Do(req)
+	dur := time.Since(start)
+	if err != nil {
+		slog.Error("discord API request failed", "url", url, "dur", dur, "err", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	slog.Debug("discord API", "url", url, "status", resp.StatusCode, "dur", dur)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("discord API %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
 }

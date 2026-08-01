@@ -15,8 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	"bernard/chat"
 	"bernard/commands"
 	"bernard/discord"
+	"bernard/gateway"
 	"bernard/llm"
 )
 
@@ -28,6 +30,7 @@ type server struct {
 	llmBaseURL    string
 	llmAPIKey     string
 	llmModel      string
+	logLevel      slog.Level
 }
 
 func main() {
@@ -35,15 +38,23 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	slog.SetLogLoggerLevel(s.logLevel)
 	discord.SetBotToken(s.botToken)
 
 	var llmClient *llm.Client
 	if s.llmBaseURL != "" && s.llmAPIKey != "" {
 		llmClient = llm.NewClient(s.llmBaseURL, s.llmAPIKey, s.llmModel)
 	} else {
-		slog.Warn("LLM config missing, /chat is offline")
+		slog.Warn("LLM config missing, chat is offline")
 	}
-	commands.ConfigureChat(llmClient, s.applicationID)
+	bernard := chat.New(llmClient, s.applicationID)
+
+	// Static facts once, so per-turn lines don't repeat them.
+	slog.Info("chat config",
+		"model", s.llmModel,
+		"llm_configured", llmClient != nil,
+		"tools", bernard.ToolNames(),
+		"log_level", s.logLevel)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", s.handlePing)
@@ -66,6 +77,29 @@ func main() {
 		}
 	}()
 
+	// Gateway connection for @mention chat. A fatal error (bad token or
+	// intents) stops only this entry point; slash commands keep working.
+	go func() {
+		err := gateway.Run(ctx, gateway.Config{
+			Token:   s.botToken,
+			Intents: gateway.IntentGuilds | gateway.IntentGuildMessages,
+			OnEvent: func(eventType string, data json.RawMessage) {
+				if eventType != "MESSAGE_CREATE" {
+					return
+				}
+				var msg discord.Message
+				if err := json.Unmarshal(data, &msg); err != nil {
+					slog.Warn("bad MESSAGE_CREATE payload", "err", err)
+					return
+				}
+				bernard.HandleMention(msg)
+			},
+		})
+		if err != nil {
+			slog.Error("gateway stopped for good", "err", err)
+		}
+	}()
+
 	<-ctx.Done()
 	slog.Info("shutting down")
 
@@ -76,11 +110,16 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Deferred commands run followups in goroutines the server doesn't track.
-	// 85s = LLM timeout (60s) + followup (10s) + retry sleep (2s) + retry (10s),
-	// with headroom.
-	if !commands.WaitBackground(85 * time.Second) {
-		slog.Warn("background tasks did not finish before timeout")
+	// Chat replies run in goroutines the HTTP server doesn't track. A tool
+	// loop can outlast any reasonable wait, so after ShutdownWait we cancel
+	// in-flight turns (users get a "restarting" reply) and give those
+	// replies a moment to post.
+	if !bernard.Wait(chat.ShutdownWait) {
+		slog.Warn("chat replies did not finish before timeout, cancelling")
+		bernard.Cancel()
+		if !bernard.Wait(10 * time.Second) {
+			slog.Warn("chat replies still running after cancel")
+		}
 	}
 	slog.Info("stopped")
 }

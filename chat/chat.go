@@ -1,0 +1,249 @@
+// Package chat is Bernard's conversation: channel-scoped history, a
+// tool-calling loop over an LLM, and the @mention entry point that drives
+// them. State lives in memory; the Discord channel is the durable backup.
+package chat
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"bernard/discord"
+	"bernard/llm"
+	"bernard/tools"
+)
+
+// Service owns everything one bot instance needs to chat: the LLM client,
+// the tool registry, and per-channel conversation state. A nil llm client
+// leaves chat offline.
+type Service struct {
+	llm   *llm.Client
+	tools *tools.Registry
+	botID string // application ID; the bot's own user ID on messages
+
+	mu       sync.Mutex
+	sessions map[string]*session
+
+	// background tracks in-flight replies so shutdown can wait for them —
+	// the work outlives the gateway event that started it.
+	background sync.WaitGroup
+	ctx        context.Context
+	cancel     context.CancelFunc
+}
+
+func New(client *llm.Client, botID string) *Service {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Service{
+		llm:   client,
+		botID: botID,
+		tools: tools.NewRegistry(toolResultCap,
+			tools.CurrentTime{},
+			tools.NewWebFetch(webFetchTimeout, toolResultCap),
+		),
+		sessions: make(map[string]*session),
+		ctx:      ctx,
+		cancel:   cancel,
+	}
+}
+
+// ToolNames lists the registered tools, for the startup log line.
+func (s *Service) ToolNames() []string { return s.tools.Names() }
+
+// Wait blocks until in-flight replies finish or timeout elapses.
+// Returns false on timeout.
+func (s *Service) Wait(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		s.background.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// Cancel aborts in-flight replies so users get a "restarting" note instead
+// of an eternal typing indicator. One-way: only call on the way down.
+func (s *Service) Cancel() { s.cancel() }
+
+// HandleMention processes a gateway MESSAGE_CREATE event: when the message
+// @mentions the bot, reply in the channel. Returns whether the message was
+// accepted, mostly for tests.
+//
+// Called from the gateway read loop, so it only filters synchronously and
+// does the work in the background.
+func (s *Service) HandleMention(msg discord.Message) bool {
+	if msg.ChannelID == "" || msg.Author.ID == s.botID || msg.Author.Bot || msg.WebhookID != "" {
+		return false // own replies, other bots, webhooks
+	}
+	if !slices.ContainsFunc(msg.Mentions, func(u discord.User) bool { return u.ID == s.botID }) {
+		return false
+	}
+
+	question := stripMention(msg.Content, s.botID)
+	s.goBackground(func() {
+		switch {
+		case s.llm == nil:
+			s.reply(msg.ChannelID, offlineReply)
+		case question == "":
+			s.reply(msg.ChannelID, emptyAskReply)
+		default:
+			_ = discord.TriggerTyping(msg.ChannelID) // best effort
+			s.reply(msg.ChannelID, s.answer(msg, question))
+		}
+	})
+	return true
+}
+
+// answer is the harness run for one question: sync the channel delta, run
+// the tool loop, commit on success. Returns the reply text.
+func (s *Service) answer(msg discord.Message, question string) string {
+	start := time.Now()
+	sess := s.sessionFor(msg.ChannelID)
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+
+	// The triggering message is usually in the fetch too; it enters the
+	// prompt as the current turn instead.
+	delta, seenID := s.syncChannel(sess, msg.ChannelID, msg.ID)
+
+	current := userMessage(msg.Author.Username, question)
+	ctx, cancel := context.WithTimeout(s.ctx, invocationTimeout)
+	defer cancel()
+
+	prompt := buildContext(systemPrompt, "", append(sess.history(), delta...), current)
+	res, err := runToolLoop(ctx, s.llm, s.tools, prompt)
+	reply := res.reply
+	switch {
+	case errors.Is(err, context.Canceled):
+		reply = restartingReply
+	case errors.Is(err, context.DeadlineExceeded):
+		reply = timeoutReply
+	case err != nil:
+		reply = fmt.Sprintf("error bro, katanya %q", err.Error())
+	default:
+		if reply == "" {
+			reply = noAnswerReply
+		}
+		// Commit only on success: an unanswered question in history would
+		// get re-answered next time, and a failed round could leave a
+		// dangling tool_call pair (DeepSeek 400s on those). The channel
+		// delta and its watermark commit with the exchange, so a failed
+		// run refetches the same delta.
+		unit := append(delta, current)
+		sess.append(append(unit, res.produced...))
+		sess.synced = true
+		sess.lastSeenID = maxSnowflake(seenID, msg.ID)
+	}
+
+	s.logAnswer(msg, sess, res, reply, len(delta), time.Since(start), err)
+	return reply
+}
+
+// logAnswer emits the one line per conversation turn. Fields that only
+// describe the happy path are omitted — their presence is the signal.
+func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, reply string, synced int, dur time.Duration, err error) {
+	attrs := []any{
+		"channel", msg.ChannelID,
+		"user", msg.Author.Username,
+		"history", len(sess.units),
+		"rounds", res.rounds,
+		"prompt_tokens", res.usage.PromptTokens,
+		"cache_hit_tokens", res.usage.CacheHitTokens,
+		"completion_tokens", res.usage.CompletionTokens,
+		"reply_chars", len(reply),
+		"dur", dur.Round(time.Millisecond),
+	}
+	if synced > 0 {
+		attrs = append(attrs, "synced", synced)
+	}
+	if res.toolCalls > 0 {
+		attrs = append(attrs, "tools", res.toolCalls)
+	}
+	if res.grace {
+		attrs = append(attrs, "grace", true)
+	}
+	if fr := res.usage.FinishReason; fr != "" && fr != "stop" {
+		attrs = append(attrs, "finish", fr) // "length" means a cut-off reply
+	}
+	if err != nil {
+		slog.Error("chat failed", append(attrs, "err", err)...)
+		return
+	}
+	slog.Info("chat done", attrs...)
+}
+
+// syncChannel fetches channel messages the session doesn't represent yet:
+// recent history on the first sync (restart context), messages sent between
+// turns afterwards. excludeID drops the triggering message. Best effort — a
+// failed fetch just means answering without the gap.
+func (s *Service) syncChannel(sess *session, channelID, excludeID string) ([]llm.Message, string) {
+	var msgs []discord.Message
+	var err error
+	if sess.lastSeenID == "" {
+		msgs, err = discord.GetMessagesFromChannel(channelID, initialSyncFetch)
+	} else {
+		msgs, err = discord.GetMessagesAfter(channelID, sess.lastSeenID, gapSyncFetch)
+	}
+	if err != nil {
+		slog.Warn("chat channel sync failed", "channel", channelID, "err", err)
+		return nil, sess.lastSeenID
+	}
+	delta := channelDelta(msgs, s.botID, !sess.synced, excludeID)
+	seenID := newestMessageID(msgs, sess.lastSeenID)
+	// fetched=0 → REST/watermark problem; fetched>0 delta=0 → filtering
+	// problem; delta>0 → the messages made it into the prompt.
+	slog.Debug("chat sync",
+		"channel", channelID,
+		"initial", !sess.synced,
+		"after", sess.lastSeenID,
+		"fetched", len(msgs),
+		"delta", len(delta),
+		"watermark", seenID)
+	return delta, seenID
+}
+
+func (s *Service) sessionFor(channelID string) *session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[channelID]
+	if !ok {
+		sess = &session{}
+		s.sessions[channelID] = sess
+	}
+	return sess
+}
+
+func (s *Service) goBackground(fn func()) {
+	s.background.Add(1)
+	go func() {
+		defer s.background.Done()
+		fn()
+	}()
+}
+
+func (s *Service) reply(channelID, content string) {
+	if err := discord.CreateMessage(channelID, content); err != nil {
+		slog.Error("chat reply failed, retrying once", "err", err)
+		time.Sleep(2 * time.Second)
+		if err := discord.CreateMessage(channelID, content); err != nil {
+			slog.Error("chat reply retry failed", "err", err)
+		}
+	}
+}
+
+// stripMention removes the bot's mention tokens (<@id> and <@!id>) and
+// trims what remains.
+func stripMention(content, botID string) string {
+	content = strings.ReplaceAll(content, "<@"+botID+">", "")
+	content = strings.ReplaceAll(content, "<@!"+botID+">", "")
+	return strings.TrimSpace(content)
+}

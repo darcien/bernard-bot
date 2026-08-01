@@ -35,6 +35,8 @@ type User struct {
 
 type Message struct {
 	ID        string `json:"id"`
+	ChannelID string `json:"channel_id,omitempty"` // present on gateway MESSAGE_CREATE events
+	GuildID   string `json:"guild_id,omitempty"`
 	Content   string `json:"content"`
 	Author    User   `json:"author"`
 	Timestamp string `json:"timestamp"` // ISO8601, e.g. "2021-01-01T00:00:00.000000+00:00"
