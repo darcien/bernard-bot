@@ -118,13 +118,44 @@ func TestTruncateRunes_MultibyteSafe(t *testing.T) {
 	}
 }
 
-func TestTruncateHeadTail_KeepsBothEnds(t *testing.T) {
-	s := "HEAD" + strings.Repeat("x", 100) + "TAIL"
-	got := TruncateHeadTail(s, 20)
-	if !strings.HasPrefix(got, "HEAD") || !strings.HasSuffix(got, "TAIL") {
-		t.Errorf("want head and tail kept, got %q", got)
-	}
-	if !strings.Contains(got, "truncated") {
-		t.Errorf("want marker, got %q", got)
-	}
+func TestTruncateHeadTail(t *testing.T) {
+	s := "HEAD" + strings.Repeat("x", 1000) + "TAIL"
+
+	t.Run("keeps both ends", func(t *testing.T) {
+		got := TruncateHeadTail(s, 200)
+		if !strings.HasPrefix(got, "HEAD") || !strings.HasSuffix(got, "TAIL") {
+			t.Errorf("want head and tail kept, got %q", got)
+		}
+		if !strings.Contains(got, "truncated") {
+			t.Errorf("want marker, got %q", got)
+		}
+	})
+
+	// The marker counts against the budget, so a second truncation
+	// downstream is a no-op instead of chopping the tail again.
+	t.Run("result fits the budget", func(t *testing.T) {
+		for _, max := range []int{40, 100, 200, 999} {
+			if n := utf8.RuneCountInString(TruncateHeadTail(s, max)); n > max {
+				t.Errorf("max %d: got %d runes", max, n)
+			}
+		}
+	})
+
+	// Documents front-load: an aggregator's stories, an article's argument.
+	t.Run("head gets most of the budget", func(t *testing.T) {
+		got := TruncateHeadTail(s, 200)
+		head, tail, ok := strings.Cut(got, truncationMarker)
+		if !ok {
+			t.Fatalf("want a marker separating head and tail, got %q", got)
+		}
+		if len(head) <= len(tail)*2 {
+			t.Errorf("want a head-weighted split, got head=%d tail=%d", len(head), len(tail))
+		}
+	})
+
+	t.Run("short input is untouched", func(t *testing.T) {
+		if got := TruncateHeadTail("short", 100); got != "short" {
+			t.Errorf("got %q", got)
+		}
+	})
 }

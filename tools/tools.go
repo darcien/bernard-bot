@@ -139,13 +139,25 @@ func TruncateRunes(s string, max int) string {
 	return string([]rune(s)[:max]) + "\n[truncated]"
 }
 
-// TruncateHeadTail caps s at max runes keeping the head and tail halves —
-// pages and logs often bury the useful part at the bottom.
+const truncationMarker = "\n[... truncated ...]\n"
+
+// TruncateHeadTail caps s at max runes, keeping a head-weighted slice plus a
+// short tail. Weighted rather than halved because documents front-load: a
+// link aggregator's stories, an article's argument. The tail is kept because
+// conclusions and totals live at the bottom.
+//
+// The marker counts against max, so the result never exceeds the caller's
+// budget and a second truncation downstream is a no-op.
 func TruncateHeadTail(s string, max int) string {
 	if utf8.RuneCountInString(s) <= max {
 		return s
 	}
+	budget := max - utf8.RuneCountInString(truncationMarker)
+	if budget < 2 {
+		return TruncateRunes(s, max)
+	}
+	head := budget * 85 / 100
+	tail := budget - head
 	rs := []rune(s)
-	half := max / 2
-	return string(rs[:half]) + "\n[... truncated ...]\n" + string(rs[len(rs)-half:])
+	return string(rs[:head]) + truncationMarker + string(rs[len(rs)-tail:])
 }

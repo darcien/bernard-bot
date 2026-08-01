@@ -152,6 +152,11 @@ func (f *WebFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 		"text_chars", len(text),
 		"dur", time.Since(start).Round(time.Millisecond),
 	}
+	// How much of the page the model never saw. Without this, a cap that
+	// silently discards most of a page looks identical to a short page.
+	if dropped := len(content) - len(text); dropped > 0 {
+		attrs = append(attrs, "full_chars", len(content), "dropped_chars", dropped)
+	}
 	if len(body) == webFetchBodyLimit {
 		attrs = append(attrs, "body_limit_hit", true)
 	}
