@@ -26,6 +26,9 @@ type Service struct {
 	tools *tools.Registry
 	botID string // application ID; the bot's own user ID on messages
 
+	// admission bounds turns in flight across every channel; see admission.go.
+	admission *admission
+
 	mu       sync.Mutex
 	sessions map[string]*session
 
@@ -45,9 +48,10 @@ func New(client *llm.Client, botID string) *Service {
 			tools.CurrentTime{},
 			tools.NewWebFetch(webFetchTimeout, toolResultCap),
 		),
-		sessions: make(map[string]*session),
-		ctx:      ctx,
-		cancel:   cancel,
+		admission: newAdmission(maxConcurrentTurns),
+		sessions:  make(map[string]*session),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 }
 
@@ -96,11 +100,34 @@ func (s *Service) HandleMention(msg discord.Message) bool {
 		case question == "":
 			s.reply(msg.ChannelID, emptyAskReply)
 		default:
-			_ = discord.TriggerTyping(msg.ChannelID) // best effort
-			s.reply(msg.ChannelID, s.answer(msg, question))
+			s.reply(msg.ChannelID, s.runTurn(msg, question))
 		}
 	})
 	return true
+}
+
+// runTurn answers one mention under admission. The typing indicator
+// starts first, so a mention waiting for a slot still shows the bot is alive,
+// and the slot is taken before answer starts its own clock, so queueing is
+// never charged to the turn's reply budget.
+//
+// A refused turn never reaches logAnswer, so both refusals log here — that
+// line is the only record they leave.
+func (s *Service) runTurn(msg discord.Message, question string) string {
+	stopTyping := keepTyping(s.ctx, msg.ChannelID)
+	defer stopTyping()
+
+	if err := s.admission.enter(s.ctx, admissionWait); err != nil {
+		if errors.Is(err, errBusy) {
+			slog.Warn("chat too busy", "channel", msg.ChannelID, "waited", admissionWait)
+			return busyReply
+		}
+		slog.Debug("chat admission aborted", "channel", msg.ChannelID, "err", err)
+		return restartingReply
+	}
+	defer s.admission.leave()
+
+	return s.answer(msg, question)
 }
 
 // answer is the harness run for one question: sync the channel delta, run
@@ -116,7 +143,7 @@ func (s *Service) answer(msg discord.Message, question string) string {
 	delta, seenID := s.syncChannel(sess, msg.ChannelID, msg.ID)
 
 	current := userMessage(msg.Author.Username, question)
-	ctx, cancel := context.WithTimeout(s.ctx, invocationTimeout)
+	ctx, cancel := context.WithTimeout(s.ctx, turnTimeout)
 	defer cancel()
 
 	prompt := buildContext(systemPrompt, "", append(sess.history(), delta...), current)

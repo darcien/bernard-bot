@@ -79,7 +79,7 @@ func withSources(reply string, sources []string) (string, int) {
 // plain fetches but oldest-first for ?after= fetches, so no caller-side
 // order assumption survives contact with the API. This is the single
 // channel → history conversion, used for both the initial sync after a
-// restart and the per-invocation gap sync of messages sent between chats.
+// restart and the per-turn gap sync of messages sent between chats.
 //
 //   - humans → user turns, "name: content" prefixed like the live path
 //   - the bot's own messages (matched by user ID == application ID; not

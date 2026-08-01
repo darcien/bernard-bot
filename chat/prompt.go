@@ -59,5 +59,6 @@ const (
 	emptyAskReply   = "kenapa bro?"
 	noAnswerReply   = "kurang tau bro"
 	restartingReply = "lagi restart bro, tanya lagi sebentar"
+	busyReply       = "lagi banyak yang nanya bro, coba lagi bentar"
 	timeoutReply    = "kelamaan bro, nyerah. coba tanya yang lebih gampang"
 )

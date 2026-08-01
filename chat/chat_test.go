@@ -171,6 +171,30 @@ func TestHandleMention_Offline(t *testing.T) {
 	}
 }
 
+// A mention that arrives while the service is shutting down is answered
+// with the restarting note rather than hanging on admission: the
+// turn's own context does not exist yet, so the admission is the only thing that
+// can notice.
+func TestHandleMention_RestartingWhenShutdownBeatsAdmission(t *testing.T) {
+	var replies []string
+	fakeDiscord(t, &replies, "")
+	s := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("LLM must not be called when admission fails")
+	})
+	s.admission = newAdmission(0) // no slot will ever open
+	s.Cancel()
+
+	if !s.HandleMention(mentionMsg()) {
+		t.Fatal("want mention accepted")
+	}
+	if !s.Wait(5 * time.Second) {
+		t.Fatal("background task did not finish")
+	}
+	if len(replies) != 1 || replies[0] != restartingReply {
+		t.Errorf("got %q, want %q", replies, restartingReply)
+	}
+}
+
 func TestAnswer_LLMErrorLeavesSessionUnchanged(t *testing.T) {
 	var replies []string
 	fakeDiscord(t, &replies, "")
