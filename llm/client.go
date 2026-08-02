@@ -1,11 +1,8 @@
 package llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -108,7 +105,7 @@ type chatResponse struct {
 func (c *Client) Chat(ctx context.Context, msgs []Message, tools json.RawMessage) (Message, Usage, error) {
 	reqBody, err := json.Marshal(chatRequest{
 		Model:     c.Model,
-		Messages:  msgs,
+		Messages:  sanitize(msgs),
 		Tools:     tools,
 		MaxTokens: maxOutputTokens,
 		N:         1,
@@ -118,25 +115,9 @@ func (c *Client) Chat(ctx context.Context, msgs []Message, tools json.RawMessage
 		return Message{}, Usage{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(reqBody))
+	body, err := c.send(ctx, c.BaseURL+"/chat/completions", reqBody)
 	if err != nil {
 		return Message{}, Usage{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return Message{}, Usage{}, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return Message{}, Usage{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Message{}, Usage{}, fmt.Errorf("llm API %d from %s: %s", resp.StatusCode, req.URL.Host+req.URL.Path, truncate(string(body), 300))
 	}
 
 	var parsed chatResponse
