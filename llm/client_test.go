@@ -112,6 +112,30 @@ func TestChat_ToolCallRoundTrip(t *testing.T) {
 	}
 }
 
+// A tool result names its producer so maintenance can ask it for geometry.
+// Nothing else carries a name.
+func TestChat_ToolResultCarriesTheToolName(t *testing.T) {
+	var rawBody string
+	c := captureServer(t, &rawBody, `{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`)
+
+	msgs := []Message{
+		{Role: "user", Content: "what's on hn"},
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_1", Type: "function",
+			Function: FunctionCall{Name: "web_fetch", Arguments: "{}"}}}},
+		{Role: "tool", Name: "web_fetch", ToolCallID: "call_1", Content: "page"},
+	}
+	if _, _, err := c.Chat(context.Background(), msgs, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rawBody, `"name":"web_fetch","tool_call_id":"call_1"`) {
+		t.Errorf("want the tool result to carry its name, got %s", rawBody)
+	}
+	if strings.Count(rawBody, `"name":"web_fetch"`) != 2 {
+		// Once in tool_calls, once on the result, nowhere else.
+		t.Errorf("want the name only where it belongs, got %s", rawBody)
+	}
+}
+
 func TestChat_NilToolsOmitted(t *testing.T) {
 	var rawBody string
 	c := captureServer(t, &rawBody, `{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`)

@@ -33,16 +33,11 @@ const (
 	// minRecentKeep: the current question and the exchange before it survive
 	// even when one of them alone exceeds the budget.
 	recentKeep = 2
-	// Snip geometry, Reasonix's: minSnipBytes is their minPruneBytes, the
-	// size below which rewriting a result saves less than the marker costs;
-	// the line counts are their web_fetch SnipHint, generous head and short
-	// tail because a fetched page front-loads. The byte pair is the fallback
-	// for content with too few lines to split — one long line of JSON.
-	minSnipBytes  = 1024
-	snipHead      = 120
-	snipTail      = 12
-	snipHeadBytes = 12000
-	snipTailBytes = 2000
+	// minSnipBytes is Reasonix's minPruneBytes: below this the marker costs
+	// more than the rewrite saves. Geometry is deliberately not here — it
+	// belongs to the tool (tools.SnipHint), so a second large-output tool
+	// cannot inherit web_fetch's shape by accident.
+	minSnipBytes = 1024
 	// Summarisation guards, Reasonix's: a fold smaller than minFoldTokens
 	// saves less than the call costs; summaryTimeout bounds a stalled
 	// summariser; a user turn under pinnedUserTokens is kept verbatim rather

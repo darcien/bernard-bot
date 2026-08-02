@@ -83,6 +83,15 @@ func NewWebFetch(timeout time.Duration) *WebFetch {
 
 func (f *WebFetch) Name() string { return "web_fetch" }
 
+func (f *WebFetch) ReadOnly() bool { return true }
+
+// SnipHint front-loads: an article's argument and an aggregator's stories
+// live up top, conclusions and totals at the bottom. Reasonix's
+// webFetch.SnipHint exactly.
+func (f *WebFetch) SnipHint() SnipHint {
+	return SnipHint{Head: 120, Tail: 12, HeadChars: 12000, TailChars: 2000}
+}
+
 func (f *WebFetch) Description() string {
 	return "Fetch a public http(s) URL and return its text content. Use to read web pages, articles, or APIs the user asks about."
 }

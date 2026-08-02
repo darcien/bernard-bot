@@ -36,9 +36,15 @@ func NewClient(baseURL, apiKey, model string) *Client {
 // Content is a plain string with no omitempty on purpose: DeepSeek's strict
 // deserializer rejects a message missing the content field, so an assistant
 // message carrying only tool calls must still send "content": "".
+//
+// Name is the tool that produced a result, set only on tool messages: without
+// it the snip pass has a call id, which names nothing, and cannot ask that
+// tool how its output is shaped (tools.SnipHint). Legal on the wire — OpenAI
+// carries it on every message, as does Reasonix's request struct.
 type Message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content"`
+	Name       string     `json:"name,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }

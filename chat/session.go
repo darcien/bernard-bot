@@ -266,7 +266,7 @@ func (s *session) needsMaintenance() bool {
 // stopped one happening.
 //
 // Caller must hold s.mu.
-func (s *session) maintain(fold foldFunc) {
+func (s *session) maintain(hintFor snipHintFunc, fold foldFunc) {
 	tokens := s.lastPromptTokens
 	if tokens < int(contextWindow*compactRatio) {
 		// Breathing room: whatever the last fold bought, it worked, so the
@@ -281,7 +281,7 @@ func (s *session) maintain(fold foldFunc) {
 		return
 	}
 	if tokens < int(contextWindow*compactRatio) {
-		s.snippedResults, s.snippedBytes = snipRegion(region)
+		s.snippedResults, s.snippedBytes = snipRegion(region, hintFor)
 		return
 	}
 

@@ -86,7 +86,8 @@ func wellFormed(msgs []Message) bool {
 
 // pairResults returns one tool message per call, in call order, inventing a
 // placeholder for a call nothing answered. Matching is by id; a result whose
-// id names no call is dropped with it.
+// id names no call is dropped with it. A placeholder carries its call's name,
+// so a repaired history still tells maintenance what produced the result.
 func pairResults(calls []ToolCall, avail []Message) []Message {
 	byID := make(map[string]Message, len(avail))
 	for _, r := range avail {
@@ -98,7 +99,7 @@ func pairResults(calls []ToolCall, avail []Message) []Message {
 			out = append(out, r)
 			continue
 		}
-		out = append(out, Message{Role: "tool", ToolCallID: tc.ID, Content: interruptedToolResult})
+		out = append(out, Message{Role: "tool", Name: tc.Function.Name, ToolCallID: tc.ID, Content: interruptedToolResult})
 	}
 	return out
 }

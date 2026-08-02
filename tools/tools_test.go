@@ -20,6 +20,7 @@ type fakeTool struct {
 }
 
 func (f *fakeTool) Name() string            { return f.name }
+func (f *fakeTool) ReadOnly() bool          { return true }
 func (f *fakeTool) Description() string     { return "fake" }
 func (f *fakeTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (f *fakeTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
@@ -102,8 +103,9 @@ func TestRegistry_ExecuteCapsResult(t *testing.T) {
 	r := NewRegistry(500, long)
 
 	got, _ := r.Execute(context.Background(), "long", "{}")
-	if len(got) > 500 {
-		t.Errorf("want the cap respected, got %d bytes", len(got))
+	ceiling := 500 + len(fmt.Sprintf(truncationMarker, 5000, 5000)) + 6
+	if len(got) > ceiling {
+		t.Errorf("want the cap respected, got %d bytes, want at most %d", len(got), ceiling)
 	}
 	if !strings.Contains(got, "truncated 4") || !strings.Contains(got, "of 5000 bytes") {
 		t.Errorf("want a sized marker, got %q", got)
@@ -137,12 +139,13 @@ func TestTruncateHeadTail(t *testing.T) {
 		}
 	})
 
-	// The marker counts against the budget, so a second truncation
-	// downstream is a no-op instead of chopping the tail again.
-	t.Run("result fits the budget", func(t *testing.T) {
+	// Marker appended after the cut, not reserved inside it, so the result
+	// runs over by its width plus outward snapping. See TruncateHeadTail.
+	t.Run("result fits the budget plus the marker", func(t *testing.T) {
 		for _, max := range []int{40, 100, 200, 999} {
-			if n := len(TruncateHeadTail(s, max)); n > max {
-				t.Errorf("max %d: got %d bytes", max, n)
+			ceiling := max + len(fmt.Sprintf(truncationMarker, len(s), len(s))) + 6
+			if n := len(TruncateHeadTail(s, max)); n > ceiling {
+				t.Errorf("max %d: got %d bytes, want at most %d", max, n, ceiling)
 			}
 		}
 	})
@@ -168,16 +171,19 @@ func TestTruncateHeadTail(t *testing.T) {
 		}
 	})
 
-	// Documents front-load: an aggregator's stories, an article's argument.
-	t.Run("head gets most of the budget", func(t *testing.T) {
+	// Blind to what the output means, so it cannot pick a side.
+	t.Run("splits the budget evenly", func(t *testing.T) {
 		got := TruncateHeadTail(s, 200)
 		head, _, ok := strings.Cut(got, "\n[... truncated")
 		if !ok {
 			t.Fatalf("want a marker separating head and tail, got %q", got)
 		}
 		_, tail, _ := strings.Cut(got, "...]\n")
-		if len(head) <= len(tail)*2 {
-			t.Errorf("want a head-weighted split, got head=%d tail=%d", len(head), len(tail))
+		if len(head) != len(tail) {
+			t.Errorf("want an even split, got head=%d tail=%d", len(head), len(tail))
+		}
+		if len(head) != 100 {
+			t.Errorf("want half the budget each side, got %d", len(head))
 		}
 	})
 
@@ -188,8 +194,46 @@ func TestTruncateHeadTail(t *testing.T) {
 		if !utf8.ValidString(got) {
 			t.Errorf("want valid UTF-8, got %q", got)
 		}
-		if len(got) > 200 {
+		ceiling := 200 + len(fmt.Sprintf(truncationMarker, len(wide), len(wide))) + 6
+		if len(got) > ceiling {
 			t.Errorf("want the budget respected, got %d bytes", len(got))
+		}
+	})
+
+	// Outward snapping used to let head and tail overlap here: the rune came
+	// out twice and the marker read a negative count.
+	t.Run("barely oversized input never overlaps or reports a negative", func(t *testing.T) {
+		re := regexp.MustCompile(`truncated (-?\d+) of (\d+) bytes`)
+		for _, max := range []int{6, 7, 8, 9, 10} {
+			in := "abcd" + "一" + "efgh" // 11 bytes, the rune at 4..6
+			got := TruncateHeadTail(in, max)
+			m := re.FindStringSubmatch(got)
+			if m == nil {
+				t.Fatalf("max %d: want a marker, got %q", max, got)
+			}
+			elided, _ := strconv.Atoi(m[1])
+			if elided < 0 {
+				t.Errorf("max %d: want a non-negative elision, got %d (%q)", max, elided, got)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("max %d: want valid UTF-8, got %q", max, got)
+			}
+			head, _, _ := strings.Cut(got, "\n[... truncated")
+			_, tail, _ := strings.Cut(got, "...]\n")
+			if len(head)+len(tail)+elided != len(in) {
+				t.Errorf("max %d: want head %d + tail %d + elided %d to equal the input %d (%q)",
+					max, len(head), len(tail), elided, len(in), got)
+			}
+		}
+	})
+
+	// Exported, so a caller can pass a budget too small to hold anything.
+	t.Run("a budget of zero or one keeps nothing", func(t *testing.T) {
+		for _, max := range []int{0, 1} {
+			got := TruncateHeadTail("hello", max)
+			if !strings.Contains(got, "of 5 bytes") {
+				t.Errorf("max %d: want the marker alone, got %q", max, got)
+			}
 		}
 	})
 

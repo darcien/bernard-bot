@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"bernard/llm"
 	"bernard/tools"
@@ -18,20 +19,32 @@ const (
 	prunedMarker  = "[elided tool result — "
 )
 
+// snipHintFunc is tools.Registry.SnipHintFor, passed in rather than reached
+// for so this package stays ignorant of the registry. Nil, or a result with no
+// name, takes the read-only default.
+type snipHintFunc func(name string) tools.SnipHint
+
+func (f snipHintFunc) hintFor(name string) tools.SnipHint {
+	if f == nil {
+		return tools.DefaultReadOnlySnip
+	}
+	return f(name)
+}
+
 // snipRegion shortens tool results in the region, leaving the tail verbatim.
 // Reports how many it rewrote and the bytes recovered, for the maintenance
 // log line.
 //
 // Idempotent: an already snipped result is skipped rather than snipped again,
 // which would compound markers and eventually lose the head too.
-func snipRegion(region [][]llm.Message) (results, savedBytes int) {
+func snipRegion(region [][]llm.Message, hintFor snipHintFunc) (results, savedBytes int) {
 	for _, unit := range region {
 		for i, m := range unit {
 			if m.Role != "tool" || len(m.Content) < minSnipBytes ||
 				strings.HasPrefix(m.Content, snippedMarker) {
 				continue
 			}
-			snipped := snipToolResult(m.Content)
+			snipped := snipToolResult(m.Content, m.Name, hintFor.hintFor(m.Name))
 			if len(snipped) >= len(m.Content) {
 				continue
 			}
@@ -81,9 +94,9 @@ func pruneToolResult(content string) string {
 	return fmt.Sprintf("%s%d bytes; re-run the tool if the content is needed]", prunedMarker, size)
 }
 
-// originalBytes reports the size of the result before any maintenance, read
-// back out of a snip marker when there is one so a prune after a snip still
-// names the real number.
+// originalBytes reports the pre-maintenance size, read back out of a snip
+// marker so a prune after a snip still names the real number. Last field
+// before " bytes" — a named marker puts the tool in front of it.
 func originalBytes(content string) int {
 	if !strings.HasPrefix(content, snippedMarker) {
 		return len(content)
@@ -93,7 +106,11 @@ func originalBytes(content string) int {
 	if end < 0 {
 		return len(content)
 	}
-	n, err := strconv.Atoi(rest[:end])
+	fields := strings.Fields(rest[:end])
+	if len(fields) == 0 {
+		return len(content)
+	}
+	n, err := strconv.Atoi(fields[len(fields)-1])
 	if err != nil {
 		return len(content)
 	}
@@ -115,24 +132,57 @@ func sourceLine(content string) string {
 	return ""
 }
 
-// snipToolResult keeps the head and tail of a result and says what went. The
-// marker carries the original size for the same reason the truncation marker
-// does: the model has to know whether it is looking at a page or a corner of
-// one.
+// snipToolResult keeps head and tail in the geometry the producing tool asked
+// for. The marker names the tool and the original size: the model has to know
+// whether it is reading a page or a corner of one, and what to re-run.
 //
-// Splitting by lines because the output is line-structured — extracted page
-// text, one link or paragraph per line — so a line boundary is a meaning
-// boundary. Content with too few lines to split falls back to bytes.
-func snipToolResult(content string) string {
-	lines := strings.Split(content, "\n")
-	if len(lines) <= snipHead+snipTail {
-		head := tools.TruncateHeadTail(content, snipHeadBytes+snipTailBytes)
-		return fmt.Sprintf("%s%d bytes, single large line truncated]\n%s",
-			snippedMarker, len(content), head)
+// Splits on lines because the output is line-structured, so a line boundary is
+// a meaning boundary. Too few lines to split falls back to bytes.
+//
+// The byte fallback is Reasonix's: head at most half the content, tail at most
+// a quarter, so a snip always shrinks even when the hint's char budgets exceed
+// what is there. Rune boundaries, or the JSON encode corrupts.
+func snipToolResult(content, name string, h tools.SnipHint) string {
+	label := ""
+	if name != "" {
+		label = name + ", "
 	}
-	return fmt.Sprintf("%s%d bytes, showing first %d lines and last %d lines]\n%s\n[... %d lines omitted ...]\n%s",
-		snippedMarker, len(content), snipHead, snipTail,
-		strings.Join(lines[:snipHead], "\n"),
-		len(lines)-snipHead-snipTail,
-		strings.Join(lines[len(lines)-snipTail:], "\n"))
+	lines := strings.Split(content, "\n")
+	// A hint keeping no lines would leave the line branch emitting markers
+	// and nothing else.
+	if h.Head <= 0 || h.Tail <= 0 || len(lines) <= h.Head+h.Tail {
+		head := firstRunes(content, min(h.HeadChars, len(content)/2))
+		tail := lastRunes(content, min(h.TailChars, len(content)/4))
+		return fmt.Sprintf("%s%s%d bytes, single large line truncated]\n%s\n[... %d bytes omitted ...]\n%s",
+			snippedMarker, label, len(content),
+			head, len(content)-len(head)-len(tail), tail)
+	}
+	return fmt.Sprintf("%s%s%d bytes, showing first %d lines and last %d lines]\n%s\n[... %d lines omitted ...]\n%s",
+		snippedMarker, label, len(content), h.Head, h.Tail,
+		strings.Join(lines[:h.Head], "\n"),
+		len(lines)-h.Head-h.Tail,
+		strings.Join(lines[len(lines)-h.Tail:], "\n"))
+}
+
+// firstRunes returns the first n bytes, back to a rune boundary.
+func firstRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// lastRunes returns the last n bytes, forward to a rune boundary.
+func lastRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	start := len(s) - n
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[start:]
 }

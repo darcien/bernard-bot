@@ -46,6 +46,24 @@ func TestSanitize_BackfillsUnansweredCall(t *testing.T) {
 	if got[2].ToolCallID != "c2" || got[2].Content != interruptedToolResult {
 		t.Errorf("want a placeholder answering c2, got %+v", got[2])
 	}
+	// Stands in for a real result, so it carries the same name.
+	if got[2].Name != "probe" {
+		t.Errorf("want the placeholder named after the call it answers, got %q", got[2].Name)
+	}
+}
+
+// A name must not push a healthy history off the fast path — re-allocating
+// moves the cached prefix for nothing.
+func TestSanitize_NamedResultsStayOnTheFastPath(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Content: "u"},
+		callMsg("c1"),
+		{Role: "tool", Name: "web_fetch", ToolCallID: "c1", Content: "page"},
+	}
+	got := sanitize(msgs)
+	if &got[0] != &msgs[0] {
+		t.Error("want the input slice returned unchanged")
+	}
 }
 
 func TestSanitize_ReordersResultsToMatchCalls(t *testing.T) {

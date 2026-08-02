@@ -308,7 +308,7 @@ func TestSession_MaintainOnlyOverTheTrigger(t *testing.T) {
 	sess.observe(60000, 20000) // 2% of the window, the old char budget's scale
 	for range 5 {
 		sess.append([]llm.Message{{Role: "user", Content: strings.Repeat("x", 20000)}})
-		sess.maintain(failFold(t))
+		sess.maintain(nil, failFold(t))
 	}
 	if len(sess.units) != 5 || sess.foldedUnits != 0 {
 		t.Errorf("want all 5 units kept, got %d (trimmed %d)", len(sess.units), sess.foldedUnits)
@@ -317,7 +317,7 @@ func TestSession_MaintainOnlyOverTheTrigger(t *testing.T) {
 	// Over the trigger, maintenance folds down to the tail budget.
 	sess.observe(60000, int(contextWindow*forceRatio))
 	sess.append([]llm.Message{{Role: "user", Content: "over"}})
-	sess.maintain(stubFold)
+	sess.maintain(nil, stubFold)
 	if sess.foldedUnits == 0 {
 		t.Fatal("want a fold once the measured prompt crosses the trigger")
 	}

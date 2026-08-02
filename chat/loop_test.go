@@ -21,6 +21,7 @@ type sourcedTool struct {
 }
 
 func (s *sourcedTool) Name() string            { return "fetch" }
+func (s *sourcedTool) ReadOnly() bool          { return true }
 func (s *sourcedTool) Description() string     { return "fetch" }
 func (s *sourcedTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (s *sourcedTool) Source(json.RawMessage) string {
@@ -69,6 +70,17 @@ func TestRunToolLoop_NumbersSources(t *testing.T) {
 	if len(toolResults) == 0 || !strings.Contains(toolResults[0], `[1] source: https://example.com/x`) {
 		t.Error("want the citation marker sent to the model with the tool result")
 	}
+	// Dropping the name would leave every test green while reverting every
+	// result to the read-only default.
+	var toolMsg llm.Message
+	for _, m := range res.produced {
+		if m.Role == "tool" {
+			toolMsg = m
+		}
+	}
+	if toolMsg.Name != "fetch" {
+		t.Errorf("want the tool result to name the tool that produced it, got %q", toolMsg.Name)
+	}
 }
 
 func TestLoopResult_CiteReusesNumberForSamePlace(t *testing.T) {
@@ -90,11 +102,40 @@ func TestLoopResult_CiteReusesNumberForSamePlace(t *testing.T) {
 type loopTool struct{ calls int }
 
 func (l *loopTool) Name() string            { return "probe" }
+func (l *loopTool) ReadOnly() bool          { return true }
 func (l *loopTool) Description() string     { return "probe" }
 func (l *loopTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (l *loopTool) Execute(context.Context, json.RawMessage) (string, error) {
 	l.calls++
 	return "probed", nil
+}
+
+// The model picks call.Function.Name, so it can name no tool at all — which
+// some endpoints validate and 400 over. Recorded unnamed instead.
+func TestRunToolLoop_UnknownToolLeavesTheResultUnnamed(t *testing.T) {
+	round := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		round++
+		if round == 1 {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"",
+				"tool_calls":[{"id":"c1","type":"function","function":{"name":"not a tool!","arguments":"{}"}}]}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"sorry"}}]}`))
+	}))
+	defer srv.Close()
+
+	reg := tools.NewRegistry(toolResultCap, &loopTool{})
+	res, err := runToolLoop(context.Background(), llm.NewClient(srv.URL, "k", "m"),
+		reg, []llm.Message{{Role: "user", Content: "u: go"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range res.produced {
+		if m.Role == "tool" && m.Name != "" {
+			t.Errorf("want no name for an unregistered tool, got %q", m.Name)
+		}
+	}
 }
 
 // A message that arrives mid-turn is folded into the run after the round's

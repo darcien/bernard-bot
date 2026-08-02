@@ -40,15 +40,21 @@ type Service struct {
 	cancel     context.CancelFunc
 }
 
+// builtinTools is the registered tool set. A function, not an inline literal,
+// so the snip-stance test holds the same list New does.
+func builtinTools() []tools.Tool {
+	return []tools.Tool{
+		tools.CurrentTime{},
+		tools.NewWebFetch(webFetchTimeout),
+	}
+}
+
 func New(client *llm.Client, botID string) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
-		llm:   client,
-		botID: botID,
-		tools: tools.NewRegistry(toolResultCap,
-			tools.CurrentTime{},
-			tools.NewWebFetch(webFetchTimeout),
-		),
+		llm:       client,
+		botID:     botID,
+		tools:     tools.NewRegistry(toolResultCap, builtinTools()...),
 		admission: newAdmission(maxConcurrentTurns),
 		sessions:  make(map[string]*session),
 		ctx:       ctx,
@@ -160,7 +166,7 @@ func (s *Service) maintain(msg discord.Message, sess *session) {
 	start := time.Now()
 	tier := contextTier(sess.lastPromptTokens)
 	folded := false
-	sess.maintain(func(region [][]llm.Message, tokPerByte float64) ([]llm.Message, bool) {
+	sess.maintain(s.tools.SnipHintFor, func(region [][]llm.Message, tokPerByte float64) ([]llm.Message, bool) {
 		if !s.admission.tryEnter() {
 			slog.Debug("chat fold skipped, no slot", "channel", msg.ChannelID)
 			return nil, false

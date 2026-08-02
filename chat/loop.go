@@ -128,7 +128,16 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 				result = fmt.Sprintf("[%d] source: %s\n\n%s",
 					res.cite(source), citationLabel(source), result)
 			}
-			record(llm.Message{Role: "tool", Content: result, ToolCallID: call.ID})
+			// The name lets maintenance resolve this result's snip geometry.
+			// Registered names only: the model chose the string, and an
+			// endpoint validating "name" would reject the next request in the
+			// turn over an invented one. Unnamed resolves to the read-only
+			// default, where an invention would have landed anyway.
+			name := ""
+			if _, ok := reg.Get(call.Function.Name); ok {
+				name = call.Function.Name
+			}
+			record(llm.Message{Role: "tool", Content: result, Name: name, ToolCallID: call.ID})
 		}
 
 		// Fold in anything said mid-turn, now that every tool call in this

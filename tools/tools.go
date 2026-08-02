@@ -22,6 +22,10 @@ type Tool interface {
 	Description() string // shown to the model
 	Schema() json.RawMessage
 	Execute(ctx context.Context, args json.RawMessage) (string, error)
+	// ReadOnly picks the default snip tier for a tool that declares no
+	// SnipHint: an observer front-loads its answer, a writer can fail at
+	// either end.
+	ReadOnly() bool
 }
 
 // Sourced is implemented by tools whose output comes from a citable place.
@@ -149,43 +153,43 @@ func TruncateRunes(s string, max int) string {
 // answers as if that were the page. Reasonix's marker says the same thing.
 const truncationMarker = "\n[... truncated %d of %d bytes — narrow the request to see the rest ...]\n"
 
-// TruncateHeadTail caps s at max bytes, keeping a head-weighted slice plus a
-// short tail. Weighted rather than halved because documents front-load: a
-// link aggregator's stories, an article's argument. The tail is kept because
-// conclusions and totals live at the bottom.
+// TruncateHeadTail caps s at max bytes, half from each end. Halved because
+// this runs before anything knows what the output is, so it cannot assume
+// which half matters; shape-aware shortening is the snip pass's job (SnipHint).
 //
-// Bytes, not runes, because the budget it serves is measured in bytes
-// (unitSize, and the provider's own accounting). Cuts land on rune boundaries
-// regardless: a split multibyte character would corrupt the JSON encode.
+// Bytes, not runes: the budget it serves is measured in bytes. Cuts still land
+// on rune boundaries — a split character corrupts the JSON encode.
 //
-// The marker counts against max, so the result never exceeds the caller's
-// budget and a second truncation downstream is a no-op.
+// Marker appended after the cut, not reserved inside it (Reasonix's
+// truncateToolOutput), so the result overshoots max by ~80 bytes. Bounded and
+// deliberate: 0.25% of a 32 KiB cap, and the region planner works in units of
+// tens of kilobytes.
 func TruncateHeadTail(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	// The marker's own width depends on the numbers it carries, so reserve
-	// the widest it could be: omitted can never exceed the total.
-	budget := max - len(fmt.Sprintf(truncationMarker, len(s), len(s)))
-	if budget < 2 {
-		// A budget too small to hold the marker holds nothing worth reading
-		// either; keep what fits rather than blow past the caller's cap.
-		return snapToRune(s, 0, max)
+	keep := max / 2
+	head := snapToRune(s, 0, keep)
+	// Both cuts snap outward, so a few bytes over the cap they can meet —
+	// emitting the overlap twice and reporting a negative elision.
+	tailLo := len(s) - keep
+	if tailLo < len(head) {
+		tailLo = len(head)
 	}
-	head := snapToRune(s, 0, budget*85/100)
-	tail := snapToRune(s, len(s)-(budget-len(head)), len(s))
+	tail := snapToRune(s, tailLo, len(s))
 	return head + fmt.Sprintf(truncationMarker, len(s)-len(head)-len(tail), len(s)) + tail
 }
 
-// snapToRune returns s[lo:hi] with both bounds moved inward to rune starts,
-// so a cut never splits a multibyte character. Inward, not outward, to stay
-// inside the caller's budget.
+// snapToRune returns s[lo:hi] with both bounds nudged outward to rune starts.
+// Outward, like Reasonix's snapToRuneBoundary: the few bytes it adds sit
+// inside the marker's own overshoot. A bound at or past the end is left alone
+// — a budget of 0 or 1 puts the tail's start there.
 func snapToRune(s string, lo, hi int) string {
-	for lo < len(s) && !utf8.RuneStart(s[lo]) {
-		lo++
+	for lo > 0 && lo < len(s) && !utf8.RuneStart(s[lo]) {
+		lo--
 	}
-	for hi > lo && hi < len(s) && !utf8.RuneStart(s[hi]) {
-		hi--
+	for hi < len(s) && !utf8.RuneStart(s[hi]) {
+		hi++
 	}
 	return s[lo:hi]
 }

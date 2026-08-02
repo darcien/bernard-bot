@@ -13,6 +13,8 @@ type CurrentTime struct{}
 
 func (CurrentTime) Name() string { return "current_time" }
 
+func (CurrentTime) ReadOnly() bool { return true }
+
 func (CurrentTime) Description() string {
 	return "Get the current date and time. Use when you need to know what time or day it is now."
 }
