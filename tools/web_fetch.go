@@ -159,19 +159,19 @@ func (f *WebFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 		"type", contentType,
 		"format", format,
 		"bytes", len(body),
-		"text_chars", len(text),
+		"text_bytes", len(text),
 		"dur", time.Since(start).Round(time.Millisecond),
 	}
 	// How much of the page the model never saw. Without this, a cap that
 	// silently discards most of a page looks identical to a short page.
 	if dropped := len(content) - len(text); dropped > 0 {
-		attrs = append(attrs, "full_chars", len(content), "dropped_chars", dropped)
+		attrs = append(attrs, "full_bytes", len(content), "dropped_bytes", dropped)
 	}
 	if len(body) == webFetchBodyLimit {
 		attrs = append(attrs, "body_limit_hit", true)
 	}
 	// A big page that extracts to almost nothing is a JS-rendered site, not a
-	// short page — and nothing was truncated, so dropped_chars stays absent
+	// short page — and nothing was truncated, so dropped_bytes stays absent
 	// and the two look identical. The model answers from the scraps either
 	// way; this is the only thing that says which happened.
 	if len(body) >= thinExtractMinBytes && len(content)*thinExtractRatio < len(body) {

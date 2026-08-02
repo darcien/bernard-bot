@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -95,12 +98,15 @@ func TestRegistry_ExecuteReportsSource(t *testing.T) {
 }
 
 func TestRegistry_ExecuteCapsResult(t *testing.T) {
-	long := &fakeTool{name: "long", result: strings.Repeat("a", 50)}
-	r := NewRegistry(10, long)
+	long := &fakeTool{name: "long", result: strings.Repeat("a", 5000)}
+	r := NewRegistry(500, long)
 
 	got, _ := r.Execute(context.Background(), "long", "{}")
-	if !strings.HasSuffix(got, "[truncated]") || !strings.HasPrefix(got, "aaaaaaaaaa") {
-		t.Errorf("want capped result with marker, got %q", got)
+	if len(got) > 500 {
+		t.Errorf("want the cap respected, got %d bytes", len(got))
+	}
+	if !strings.Contains(got, "truncated 4") || !strings.Contains(got, "of 5000 bytes") {
+		t.Errorf("want a sized marker, got %q", got)
 	}
 }
 
@@ -135,21 +141,55 @@ func TestTruncateHeadTail(t *testing.T) {
 	// downstream is a no-op instead of chopping the tail again.
 	t.Run("result fits the budget", func(t *testing.T) {
 		for _, max := range []int{40, 100, 200, 999} {
-			if n := utf8.RuneCountInString(TruncateHeadTail(s, max)); n > max {
-				t.Errorf("max %d: got %d runes", max, n)
+			if n := len(TruncateHeadTail(s, max)); n > max {
+				t.Errorf("max %d: got %d bytes", max, n)
 			}
+		}
+	})
+
+	// The model needs the magnitude: losing 5% and losing 95% are different
+	// answers, and identical without the numbers.
+	t.Run("marker carries the sizes", func(t *testing.T) {
+		got := TruncateHeadTail(s, 200)
+		re := regexp.MustCompile(`truncated (\d+) of (\d+) bytes`)
+		m := re.FindStringSubmatch(got)
+		if m == nil {
+			t.Fatalf("want elided and total bytes in the marker, got %q", got)
+		}
+		if m[2] != strconv.Itoa(len(s)) {
+			t.Errorf("want the original size %d, got %s", len(s), m[2])
+		}
+		// What survived plus what the marker says was elided is the input.
+		marker := fmt.Sprintf(truncationMarker, 0, 0)
+		kept := len(got) - len(m[0]) - (len(marker) - len(fmt.Sprintf("truncated %d of %d bytes", 0, 0)))
+		elided, _ := strconv.Atoi(m[1])
+		if kept+elided != len(s) {
+			t.Errorf("want kept %d + elided %d to equal the input %d", kept, elided, len(s))
 		}
 	})
 
 	// Documents front-load: an aggregator's stories, an article's argument.
 	t.Run("head gets most of the budget", func(t *testing.T) {
 		got := TruncateHeadTail(s, 200)
-		head, tail, ok := strings.Cut(got, truncationMarker)
+		head, _, ok := strings.Cut(got, "\n[... truncated")
 		if !ok {
 			t.Fatalf("want a marker separating head and tail, got %q", got)
 		}
+		_, tail, _ := strings.Cut(got, "...]\n")
 		if len(head) <= len(tail)*2 {
 			t.Errorf("want a head-weighted split, got head=%d tail=%d", len(head), len(tail))
+		}
+	})
+
+	// A cut inside a multibyte character corrupts the JSON encode.
+	t.Run("cuts on rune boundaries", func(t *testing.T) {
+		wide := strings.Repeat("日", 500)
+		got := TruncateHeadTail(wide, 200)
+		if !utf8.ValidString(got) {
+			t.Errorf("want valid UTF-8, got %q", got)
+		}
+		if len(got) > 200 {
+			t.Errorf("want the budget respected, got %d bytes", len(got))
 		}
 	})
 

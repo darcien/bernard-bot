@@ -123,8 +123,10 @@ func (r *Registry) Execute(ctx context.Context, name, args string) (result, sour
 		source = s.Source(json.RawMessage(args))
 	}
 
-	result = TruncateRunes(out, r.resultCap)
-	attrs := []any{"name", name, "args", TruncateRunes(args, 200), "dur", dur, "chars", len(result)}
+	// Every tool's output goes through the same cap, head and tail: a tool
+	// that truncated its own output already fits and passes through here.
+	result = TruncateHeadTail(out, r.resultCap)
+	attrs := []any{"name", name, "args", TruncateRunes(args, 200), "dur", dur, "bytes", len(result)}
 	if len(result) != len(out) {
 		attrs = append(attrs, "truncated_from", len(out))
 	}
@@ -141,25 +143,49 @@ func TruncateRunes(s string, max int) string {
 	return string([]rune(s)[:max]) + "\n[truncated]"
 }
 
-const truncationMarker = "\n[... truncated ...]\n"
+// truncationMarker carries the magnitude of what was cut. Without the numbers
+// the model cannot tell losing a little from losing almost everything, and so
+// has no basis for narrowing its next call — it reads a fraction of a page and
+// answers as if that were the page. Reasonix's marker says the same thing.
+const truncationMarker = "\n[... truncated %d of %d bytes — narrow the request to see the rest ...]\n"
 
-// TruncateHeadTail caps s at max runes, keeping a head-weighted slice plus a
+// TruncateHeadTail caps s at max bytes, keeping a head-weighted slice plus a
 // short tail. Weighted rather than halved because documents front-load: a
 // link aggregator's stories, an article's argument. The tail is kept because
 // conclusions and totals live at the bottom.
 //
+// Bytes, not runes, because the budget it serves is measured in bytes
+// (unitSize, and the provider's own accounting). Cuts land on rune boundaries
+// regardless: a split multibyte character would corrupt the JSON encode.
+//
 // The marker counts against max, so the result never exceeds the caller's
 // budget and a second truncation downstream is a no-op.
 func TruncateHeadTail(s string, max int) string {
-	if utf8.RuneCountInString(s) <= max {
+	if len(s) <= max {
 		return s
 	}
-	budget := max - utf8.RuneCountInString(truncationMarker)
+	// The marker's own width depends on the numbers it carries, so reserve
+	// the widest it could be: omitted can never exceed the total.
+	budget := max - len(fmt.Sprintf(truncationMarker, len(s), len(s)))
 	if budget < 2 {
-		return TruncateRunes(s, max)
+		// A budget too small to hold the marker holds nothing worth reading
+		// either; keep what fits rather than blow past the caller's cap.
+		return snapToRune(s, 0, max)
 	}
-	head := budget * 85 / 100
-	tail := budget - head
-	rs := []rune(s)
-	return string(rs[:head]) + truncationMarker + string(rs[len(rs)-tail:])
+	head := snapToRune(s, 0, budget*85/100)
+	tail := snapToRune(s, len(s)-(budget-len(head)), len(s))
+	return head + fmt.Sprintf(truncationMarker, len(s)-len(head)-len(tail), len(s)) + tail
+}
+
+// snapToRune returns s[lo:hi] with both bounds moved inward to rune starts,
+// so a cut never splits a multibyte character. Inward, not outward, to stay
+// inside the caller's budget.
+func snapToRune(s string, lo, hi int) string {
+	for lo < len(s) && !utf8.RuneStart(s[lo]) {
+		lo++
+	}
+	for hi > lo && hi < len(s) && !utf8.RuneStart(s[hi]) {
+		hi--
+	}
+	return s[lo:hi]
 }
