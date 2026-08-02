@@ -65,8 +65,7 @@ func New(client *llm.Client, botID string) *Service {
 // ToolNames lists the registered tools, for the startup log line.
 func (s *Service) ToolNames() []string { return s.tools.Names() }
 
-// Wait blocks until in-flight replies finish or timeout elapses.
-// Returns false on timeout.
+// Wait blocks until in-flight replies finish; false on timeout.
 func (s *Service) Wait(timeout time.Duration) bool {
 	done := make(chan struct{})
 	go func() {
@@ -132,72 +131,13 @@ func (s *Service) serve(msg discord.Message, question string) {
 	}
 	for {
 		s.reply(msg.ChannelID, s.runTurn(msg, question))
-		s.maintain(msg, sess)
+		s.compactAfterTurn(msg, sess)
 		next, ok := sess.finish()
 		if !ok {
 			return
 		}
 		msg, question = next, stripMention(next.Content, s.botID)
 	}
-}
-
-// maintain runs context maintenance once the answer is out, so the user never
-// waits behind a fold. It is its own unit of work and logs its own line;
-// nothing about it belongs in the turn's.
-//
-// The paid part takes an admission slot like any other endpoint call, but
-// only if one is free. Queueing for it would hold the session lock and the
-// serve loop — so the next mention in this channel would wait out someone
-// else's turn before its own could start — to buy a fold that is not urgent:
-// the trigger is still over threshold next turn, and by then a slot may be
-// free.
-func (s *Service) maintain(msg discord.Message, sess *session) {
-	sess.mu.Lock()
-	defer sess.mu.Unlock()
-	if !sess.needsMaintenance() {
-		return
-	}
-
-	// Per-run, so one turn's maintenance never reports the previous one's.
-	sess.foldedUnits, sess.foldedBytes = 0, 0
-	sess.snippedResults, sess.snippedBytes = 0, 0
-	sess.prunedResults, sess.prunedBytes = 0, 0
-
-	start := time.Now()
-	tier := contextTier(sess.lastPromptTokens)
-	folded := false
-	sess.maintain(s.tools.SnipHintFor, func(region [][]llm.Message, tokPerByte float64) ([]llm.Message, bool) {
-		if !s.admission.tryEnter() {
-			slog.Debug("chat fold skipped, no slot", "channel", msg.ChannelID)
-			return nil, false
-		}
-		defer s.admission.leave()
-		folded = true
-		return summariseRegion(s.ctx, s.llm, region, tokPerByte), true
-	})
-
-	did := sess.snippedResults > 0 || sess.prunedResults > 0 || sess.foldedUnits > 0
-	if !did {
-		return // over the tier but nothing was eligible; nothing to report
-	}
-	attrs := []any{"channel", msg.ChannelID, "turn", msg.ID, "tier", tier,
-		"history", len(sess.units), "session_bytes", sess.size()}
-	if sess.snippedResults > 0 {
-		attrs = append(attrs, "snipped_results", sess.snippedResults, "snipped_bytes", sess.snippedBytes)
-	}
-	if sess.prunedResults > 0 {
-		attrs = append(attrs, "pruned_results", sess.prunedResults, "pruned_bytes", sess.prunedBytes)
-	}
-	if sess.foldedUnits > 0 {
-		attrs = append(attrs, "folded_units", sess.foldedUnits, "folded_bytes", sess.foldedBytes,
-			"summarised", folded)
-	}
-	if sess.compactStuck {
-		// The tail alone is over the trigger: folding again would pay for a
-		// summary that cannot help.
-		attrs = append(attrs, "stuck", true)
-	}
-	slog.Info("chat maintain", append(attrs, "dur", time.Since(start).Round(time.Millisecond))...)
 }
 
 // runTurn answers one mention under admission. The typing indicator
@@ -265,9 +205,9 @@ func (s *Service) answer(msg discord.Message, question string) string {
 		return userMessage(next.Author.Username, stripMention(next.Content, s.botID)), true
 	}
 
-	prompt := buildContext(systemPrompt, "", append(sess.history(), delta...), current)
+	prompt := assemblePrompt(systemPrompt, "", append(sess.history(), delta...), current)
 	res, err := runToolLoop(ctx, s.llm, s.tools, prompt, steer)
-	// Before maintain reads it at the end of the turn. A failed run returns an
+	// Before the ladder reads it at the end of the turn. A failed run returns an
 	// empty result, so there is nothing to record and observe ignores it
 	// rather than discarding the last good sample.
 	sess.observe(res.lastPromptBytes, res.lastPromptTokens)
@@ -344,7 +284,7 @@ func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, 
 	}
 	// Context pressure: what the largest prompt measured and cost, the share
 	// of the window it used, the ratio between them, and the tier it earns —
-	// the inputs maintenance acts on, recorded where the turn can be read
+	// the inputs compaction acts on, recorded where the turn can be read
 	// against the run that follows it. prompt_bytes is here because it is the
 	// denominator of tok_per_byte: without it the ratio can't be checked, and
 	// neither can the gap against session_bytes, which counts history alone.
@@ -352,9 +292,11 @@ func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, 
 		"prompt_bytes", res.lastPromptBytes,
 		"ctx_pct", contextPct(res.lastPromptTokens),
 		"tok_per_byte", round3(sess.tokPerByte()))
-	if t := contextTier(res.lastPromptTokens); t != "" {
-		attrs = append(attrs, "tier", t)
-	}
+	// Always emitted, "none" included: ctx_pct is a percentage, so a reading
+	// like 0.815 sits next to ratios written as 0.8 in limits.go and invites
+	// exactly one wrong conclusion — that a tier should have fired. The tier
+	// says whether one did, so the scale cannot be misread.
+	attrs = append(attrs, "tier", tierName(res.lastPromptTokens))
 	if len(res.sources) > 0 {
 		// cited < sources means the model ignored its citation markers and
 		// the footer fell back to listing everything.
@@ -371,36 +313,6 @@ func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, 
 		return
 	}
 	slog.Info("chat done", attrs...)
-}
-
-// syncChannel fetches channel messages the session doesn't represent yet:
-// recent history on the first sync (restart context), messages sent between
-// turns afterwards. excludeID drops the triggering message. Best effort — a
-// failed fetch just means answering without the gap.
-func (s *Service) syncChannel(sess *session, channelID, excludeID string) ([]llm.Message, string) {
-	var msgs []discord.Message
-	var err error
-	if sess.lastSeenID == "" {
-		msgs, err = discord.GetMessagesFromChannel(channelID, initialSyncFetch)
-	} else {
-		msgs, err = discord.GetMessagesAfter(channelID, sess.lastSeenID, gapSyncFetch)
-	}
-	if err != nil {
-		slog.Warn("chat channel sync failed", "channel", channelID, "err", err)
-		return nil, sess.lastSeenID
-	}
-	delta := channelDelta(msgs, s.botID, !sess.synced, excludeID)
-	seenID := newestMessageID(msgs, sess.lastSeenID)
-	// fetched=0 → REST/watermark problem; fetched>0 delta=0 → filtering
-	// problem; delta>0 → the messages made it into the prompt.
-	slog.Debug("chat sync",
-		"channel", channelID,
-		"initial", !sess.synced,
-		"after", sess.lastSeenID,
-		"fetched", len(msgs),
-		"delta", len(delta),
-		"watermark", seenID)
-	return delta, seenID
 }
 
 func (s *Service) sessionFor(channelID string) *session {
@@ -424,11 +336,17 @@ func (s *Service) goBackground(fn func()) {
 
 func (s *Service) reply(channelID, content string) {
 	if err := discord.CreateMessage(channelID, content); err != nil {
-		slog.Error("chat reply failed, retrying once", "err", err)
+		// Warn, not Error: the retry usually works, and the outcome that
+		// matters has its own line below.
+		slog.Warn("chat reply failed, retrying once", "err", err)
 		time.Sleep(2 * time.Second)
 		if err := discord.CreateMessage(channelID, content); err != nil {
 			slog.Error("chat reply retry failed", "err", err)
+			return
 		}
+		// Otherwise recovery reads as the absence of an error line, which is
+		// the inference by silence this pass exists to remove.
+		slog.Info("chat reply retried ok", "channel", channelID)
 	}
 }
 

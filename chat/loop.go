@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"bernard/llm"
@@ -37,7 +38,7 @@ type loopResult struct {
 	usage     llm.Usage // last call's finish reason, totals across calls
 	grace     bool
 	// lastPrompt* describe the last prompt this run sent — and so the biggest,
-	// since msgs only grows within a turn: its unitSize and what the provider
+	// since msgs only grows within a turn: its size in bytes and what the provider
 	// charged for it. The pair drives the context ratio and the per-session
 	// token calibration, so both must come from the same call to mean
 	// anything together. Zero on a failed run, which returns no result.
@@ -49,12 +50,9 @@ type loopResult struct {
 	sources []string
 }
 
-// citationLabel is what the model is shown as the source of a result. The
-// line rides on top of an already-capped result, so an over-long URL has to
-// be bounded — but cutting one yields a broken link wearing the shape of a
-// working one. Keep the origin instead: it is the part the model needs to
-// name where something came from, it parses unambiguously, and the elision is
-// visible. The user's footer renders the source whole either way.
+// citationLabel keeps the origin rather than a cut prefix: it parses
+// unambiguously, the elision is visible, and the footer renders the source
+// whole either way. Why a bound exists at all: citationURLCap in limits.go.
 func citationLabel(source string) string {
 	if len(source) <= citationURLCap {
 		return source
@@ -92,8 +90,6 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 		res.produced = append(res.produced, m)
 		res.steers++
 	}
-	// priced records what one call sent and what it cost, overwriting each
-	// round so the pair describes the last (largest) prompt.
 	priced := func(sent int, u llm.Usage) {
 		res.lastPromptBytes = sent
 		res.lastPromptTokens = u.PromptTokens
@@ -107,7 +103,7 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 
 	for range maxToolRounds {
 		res.rounds++
-		sent := unitSize(msgs)
+		sent := msgBytes(msgs)
 		m, usage, err := client.Chat(ctx, msgs, reg.Schemas())
 		if err != nil {
 			return loopResult{}, err
@@ -128,7 +124,7 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 				result = fmt.Sprintf("[%d] source: %s\n\n%s",
 					res.cite(source), citationLabel(source), result)
 			}
-			// The name lets maintenance resolve this result's snip geometry.
+			// The name lets the snip pass resolve this result's geometry.
 			// Registered names only: the model chose the string, and an
 			// endpoint validating "name" would reject the next request in the
 			// turn over an invented one. Unnamed resolves to the read-only
@@ -157,8 +153,10 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 	}
 	res.grace = true
 	res.rounds++
+	// May write into msgs' backing array; safe only because msgs is dead
+	// after this — the nudge must never reach produced.
 	graced := append(msgs, llm.Message{Role: "user", Content: graceNudge})
-	sent := unitSize(graced)
+	sent := msgBytes(graced)
 	m, usage, err := client.Chat(ctx, graced, nil)
 	if err != nil {
 		return loopResult{}, err
@@ -168,4 +166,37 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 	res.produced = append(res.produced, m)
 	res.reply = m.Content
 	return res, nil
+}
+
+// withSources appends a footer for the pages this turn actually read, and
+// reports how many the reply cited. The URLs come from the harness's own
+// record, so a `[1]` can only ever resolve to a page that was really
+// fetched, and a citation number with no matching source is dropped rather
+// than guessed at.
+//
+// When the model cites nothing, the footer lists every source unnumbered
+// instead of vanishing: the pages were read either way, and provenance
+// shouldn't depend on the model remembering to ask for it.
+//
+// URLs are wrapped in <> to suppress Discord's link previews; several
+// sources would otherwise bury the answer under embed cards.
+func withSources(reply string, sources []string) (string, int) {
+	var footer strings.Builder
+	cited := 0
+	for i, source := range sources {
+		if !strings.Contains(reply, fmt.Sprintf("[%d]", i+1)) {
+			continue
+		}
+		cited++
+		fmt.Fprintf(&footer, "\n[%d] <%s>", i+1, source)
+	}
+	if cited == 0 {
+		for _, source := range sources {
+			fmt.Fprintf(&footer, "\n<%s>", source)
+		}
+	}
+	if footer.Len() == 0 {
+		return reply, 0
+	}
+	return reply + "\n" + footer.String(), cited
 }

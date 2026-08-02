@@ -51,8 +51,6 @@ func sanitize(msgs []Message) []Message {
 	return out
 }
 
-// wellFormed reports whether msgs already satisfies the contract, so the
-// repair can be skipped entirely.
 func wellFormed(msgs []Message) bool {
 	for i := 0; i < len(msgs); {
 		m := msgs[i]

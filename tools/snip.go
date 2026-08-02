@@ -13,8 +13,7 @@ package tools
 // policy with it and a new tool cannot take a default nobody chose — the
 // stance test in package chat holds that line.
 //
-// Zero value invalid; implementers return positive counts. A hint keeping no
-// lines asks for a split that keeps nothing, so SnipHintFor discards it.
+// Zero value invalid; implementers return positive counts.
 type SnipHint struct {
 	Head      int
 	Tail      int
@@ -40,7 +39,6 @@ var (
 	DefaultSideEffectingSnip = SnipHint{Head: 40, Tail: 40, HeadChars: 8000, TailChars: 8000}
 )
 
-// Get returns the registered tool by name.
 func (r *Registry) Get(name string) (Tool, bool) {
 	t, ok := r.byName[name]
 	return t, ok

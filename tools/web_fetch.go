@@ -72,6 +72,7 @@ func NewWebFetch(timeout time.Duration) *WebFetch {
 			DialContext: f.dialVetted,
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Bounds work, not exposure: every hop dials through dialVetted.
 			if len(via) >= 5 {
 				return errors.New("too many redirects")
 			}
@@ -140,7 +141,6 @@ func (f *WebFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 	req.Header.Set("User-Agent", "bernard-bot (+https://github.com/darcien/bernard-bot)")
 	req.Header.Set("Accept", acceptHeader)
 
-	start := time.Now()
 	resp, err := f.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch failed: %w", err)
@@ -162,18 +162,15 @@ func (f *WebFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 	contentType := resp.Header.Get("Content-Type")
 	content, format := readable(string(body), contentType)
 
-	// Transport facts only — what the tool layer can't see: where the
-	// request actually landed after redirects, which representation the
-	// server gave us, and how much survived conversion. What survived the cap
-	// is the registry's line to log, as `truncated_from`.
+	// Transport facts only — where the request landed after redirects, which
+	// representation the server gave us, how much arrived. The cap, the
+	// duration and truncated_from are the registry's to log.
 	attrs := []any{
 		"url", resp.Request.URL.String(), // post-redirect
 		"status", resp.StatusCode,
 		"type", contentType,
 		"format", format,
 		"bytes", len(body),
-		"text_bytes", len(content),
-		"dur", time.Since(start).Round(time.Millisecond),
 	}
 	if len(body) == webFetchBodyLimit {
 		attrs = append(attrs, "body_limit_hit", true)

@@ -17,7 +17,7 @@ const (
 	snipRatio    = 0.6
 	compactRatio = 0.8
 	forceRatio   = 0.9
-	// tailBudget is what maintenance keeps verbatim, in tokens — Reasonix's
+	// tailBudget is what compaction keeps verbatim, in tokens — Reasonix's
 	// tail budget, and what the region is measured against once compactRatio
 	// fires. A token budget, not a unit count, so a couple of large tool
 	// results can't hold the session over the trigger and re-fire the fold
@@ -29,7 +29,7 @@ const (
 	// the window and leave the fold unable to clear its own trigger.
 	tailBudget    = 16384
 	compactTarget = 0.5
-	// recentKeep is the fewest units maintenance will leave, Reasonix's
+	// recentKeep is the fewest units compaction will leave, Reasonix's
 	// minRecentKeep: the current question and the exchange before it survive
 	// even when one of them alone exceeds the budget.
 	recentKeep = 2
@@ -55,8 +55,8 @@ const (
 	graceMinRemaining = 90 * time.Second // one LLM call + reply headroom
 	maxToolRounds     = 5                // loop cap before the grace round
 	// toolResultCap is bytes per tool result, Reasonix's maxToolOutputBytes.
-	// Bytes to match unitSize, which the region is planned in. It exists to
-	// stop one huge read making the *next* request too big: maintenance only
+	// Bytes to match msgBytes, the measure the region is planned in. It exists to
+	// stop one huge read making the *next* request too big: compaction only
 	// runs after the reply, so an oversized result would otherwise sail into
 	// the following prompt unchecked. Five rounds at this cap is ~51k tokens,
 	// 5% of the window.

@@ -23,8 +23,7 @@ type Tool interface {
 	Schema() json.RawMessage
 	Execute(ctx context.Context, args json.RawMessage) (string, error)
 	// ReadOnly picks the default snip tier for a tool that declares no
-	// SnipHint: an observer front-loads its answer, a writer can fail at
-	// either end.
+	// SnipHint; see snip.go for the tiers.
 	ReadOnly() bool
 }
 
@@ -91,10 +90,8 @@ func NewRegistry(resultCap int, ts ...Tool) *Registry {
 	return r
 }
 
-// Schemas returns the OpenAI "tools" array, marshaled once at construction.
 func (r *Registry) Schemas() json.RawMessage { return r.schemas }
 
-// Names returns the registered tool names, sorted.
 func (r *Registry) Names() []string { return slices.Clone(r.names) }
 
 // Execute runs a named tool and returns its result text plus the source it
@@ -180,7 +177,6 @@ func TruncateHeadTail(s string, max int) string {
 	return head + fmt.Sprintf(truncationMarker, len(s)-len(head)-len(tail), len(s)) + tail
 }
 
-// snapToRune returns s[lo:hi] with both bounds nudged outward to rune starts.
 // Outward, like Reasonix's snapToRuneBoundary: the few bytes it adds sit
 // inside the marker's own overshoot. A bound at or past the end is left alone
 // — a budget of 0 or 1 puts the tail's start there.

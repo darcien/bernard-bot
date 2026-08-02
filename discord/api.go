@@ -2,11 +2,13 @@ package discord
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -36,7 +38,7 @@ func fetchAsBot(url string) ([]byte, error) {
 
 	start := time.Now()
 	resp, err := apiClient.Do(req)
-	dur := time.Since(start)
+	dur := time.Since(start).Round(time.Millisecond)
 	if err != nil {
 		slog.Error("discord API request failed", "url", url, "dur", dur, "err", err)
 		return nil, err
@@ -48,7 +50,7 @@ func fetchAsBot(url string) ([]byte, error) {
 		return nil, err
 	}
 
-	slog.Debug("discord API", "url", url, "status", resp.StatusCode, "dur", dur)
+	logAPI(url, resp.StatusCode, dur)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("discord API %d: %s", resp.StatusCode, string(body))
 	}
@@ -59,6 +61,8 @@ func fetchAsBot(url string) ([]byte, error) {
 // message limit, otherwise a markdown attachment. Shared by followups and
 // channel posts.
 func messagePayload(content string) (contentType string, payload []byte) {
+	// Marshal of a fixed struct of strings cannot fail, and an error return
+	// here would reach a caller with nothing to do about it.
 	if utf16Len(content) > maxMessageLength {
 		payloadJSON, _ := json.Marshal(MessageResponseData{
 			Attachments: []Attachment{{ID: 0, Filename: "response.md"}},
@@ -71,8 +75,6 @@ func messagePayload(content string) (contentType string, payload []byte) {
 
 // CreateFollowupMessage posts a followup message for a deferred interaction
 // response. Auth is the interaction token in the URL; no bot token needed.
-// Content over the message length limit is sent as a markdown file attachment,
-// same as RespondFromResult.
 // https://discord.com/developers/docs/interactions/receiving-and-responding#followup-messages
 func CreateFollowupMessage(applicationID, interactionToken, content string) error {
 	url := fmt.Sprintf("%s/webhooks/%s/%s", DiscordAPIBase, applicationID, interactionToken)
@@ -90,7 +92,7 @@ func CreateFollowupMessage(applicationID, interactionToken, content string) erro
 	// belong in logs.
 	start := time.Now()
 	resp, err := apiClient.Do(req)
-	dur := time.Since(start)
+	dur := time.Since(start).Round(time.Millisecond)
 	if err != nil {
 		slog.Error("discord API request failed", "url", "followup", "dur", dur, "err", err)
 		return err
@@ -102,7 +104,7 @@ func CreateFollowupMessage(applicationID, interactionToken, content string) erro
 		return err
 	}
 
-	slog.Debug("discord API", "url", "followup", "status", resp.StatusCode, "dur", dur)
+	logAPI("followup", resp.StatusCode, dur)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("discord API %d: %s", resp.StatusCode, string(respBody))
 	}
@@ -154,7 +156,7 @@ func postAsBot(url, contentType string, payload []byte) error {
 
 	start := time.Now()
 	resp, err := apiClient.Do(req)
-	dur := time.Since(start)
+	dur := time.Since(start).Round(time.Millisecond)
 	if err != nil {
 		slog.Error("discord API request failed", "url", url, "dur", dur, "err", err)
 		return err
@@ -165,11 +167,31 @@ func postAsBot(url, contentType string, payload []byte) error {
 	if err != nil {
 		return err
 	}
-	slog.Debug("discord API", "url", url, "status", resp.StatusCode, "dur", dur)
+	// A successful typing tick is the one call that says nothing: it re-fires
+	// every typingInterval for the life of a turn, so a long turn writes a
+	// column of identical 204s. Failure still logs, here and at the caller.
+	if !isTyping(url) || !ok(resp.StatusCode) {
+		logAPI(url, resp.StatusCode, dur)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("discord API %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
+}
+
+func isTyping(url string) bool { return strings.HasSuffix(url, "/typing") }
+
+func ok(status int) bool { return status >= 200 && status < 300 }
+
+// logAPI records one Discord call. A non-2xx answer is Warn, not Debug: a
+// transport failure already logs at Error, so leaving a 429 or a 5xx at Debug
+// made an outage quieter than a flaky socket.
+func logAPI(url string, status int, dur time.Duration) {
+	level := slog.LevelDebug
+	if !ok(status) {
+		level = slog.LevelWarn
+	}
+	slog.Log(context.Background(), level, "discord API", "url", url, "status", status, "dur", dur)
 }
 
 func GetMessagesFromChannel(channelID string, limit int) ([]Message, error) {

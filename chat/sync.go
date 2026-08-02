@@ -2,76 +2,47 @@ package chat
 
 import (
 	"cmp"
-	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
-	"strings"
 
 	"bernard/discord"
 	"bernard/llm"
 	"bernard/tools"
 )
 
-// Pure prompt-assembly functions, kept free of IO so they test directly.
+// Channel sync: what the session has not seen yet, and the watermark that
+// decides it. Snowflake ordering lives here because Discord's fetch order
+// differs by endpoint — see channelDelta.
 
-// buildContext assembles the wire message list:
-//
-//	[system message]  = system prompt + guild memory block (empty in v1)
-//	[channel history] append-only session
-//	[current message]
-//
-// Memory is concatenated onto the system prompt string, not a separate
-// message — the prefix cache keys off literal bytes, and one system message
-// is simpler. Empty memory leaves the system message byte-identical.
-func buildContext(systemPrompt, memory string, history []llm.Message, current llm.Message) []llm.Message {
-	system := systemPrompt
-	if memory != "" {
-		system += "\n\n" + memory
+// syncChannel fetches channel messages the session doesn't represent yet:
+// recent history on the first sync (restart context), messages sent between
+// turns afterwards. excludeID drops the triggering message. Best effort — a
+// failed fetch just means answering without the gap.
+func (s *Service) syncChannel(sess *session, channelID, excludeID string) ([]llm.Message, string) {
+	var msgs []discord.Message
+	var err error
+	if sess.lastSeenID == "" {
+		msgs, err = discord.GetMessagesFromChannel(channelID, initialSyncFetch)
+	} else {
+		msgs, err = discord.GetMessagesAfter(channelID, sess.lastSeenID, gapSyncFetch)
 	}
-	msgs := make([]llm.Message, 0, len(history)+2)
-	msgs = append(msgs, llm.Message{Role: "system", Content: system})
-	msgs = append(msgs, history...)
-	return append(msgs, current)
-}
-
-// userMessage prefixes content with the speaker's name — the OpenAI "name"
-// field is not reliably honored by DeepSeek, so the prefix lives in content.
-// Same shape as the bootstrap transcript lines.
-func userMessage(username, content string) llm.Message {
-	return llm.Message{Role: "user", Content: username + ": " + content}
-}
-
-// withSources appends a footer for the pages this turn actually read, and
-// reports how many the reply cited. The URLs come from the harness's own
-// record, so a `[1]` can only ever resolve to a page that was really
-// fetched, and a citation number with no matching source is dropped rather
-// than guessed at.
-//
-// When the model cites nothing, the footer lists every source unnumbered
-// instead of vanishing: the pages were read either way, and provenance
-// shouldn't depend on the model remembering to ask for it.
-//
-// URLs are wrapped in <> to suppress Discord's link previews; several
-// sources would otherwise bury the answer under embed cards.
-func withSources(reply string, sources []string) (string, int) {
-	var footer strings.Builder
-	cited := 0
-	for i, source := range sources {
-		if !strings.Contains(reply, fmt.Sprintf("[%d]", i+1)) {
-			continue
-		}
-		cited++
-		fmt.Fprintf(&footer, "\n[%d] <%s>", i+1, source)
+	if err != nil {
+		slog.Warn("chat channel sync failed", "channel", channelID, "err", err)
+		return nil, sess.lastSeenID
 	}
-	if cited == 0 {
-		for _, source := range sources {
-			fmt.Fprintf(&footer, "\n<%s>", source)
-		}
-	}
-	if footer.Len() == 0 {
-		return reply, 0
-	}
-	return reply + "\n" + footer.String(), cited
+	delta := channelDelta(msgs, s.botID, !sess.synced, excludeID)
+	seenID := newestMessageID(msgs, sess.lastSeenID)
+	// fetched=0 → REST/watermark problem; fetched>0 delta=0 → filtering
+	// problem; delta>0 → the messages made it into the prompt.
+	slog.Debug("chat sync",
+		"channel", channelID,
+		"initial", !sess.synced,
+		"after", sess.lastSeenID,
+		"fetched", len(msgs),
+		"delta", len(delta),
+		"watermark", seenID)
+	return delta, seenID
 }
 
 // channelDelta maps fetched channel messages to history turns, oldest

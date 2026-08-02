@@ -1,5 +1,7 @@
 package chat
 
+import "bernard/llm"
+
 // systemPrompt is byte-stable by design: no timestamps or other dynamic
 // content, so the provider's prefix cache keeps hitting across turns. The
 // model calls the current_time tool when it needs to know the time.
@@ -62,3 +64,30 @@ const (
 	busyReply       = "lagi banyak yang nanya bro, coba lagi bentar"
 	timeoutReply    = "kelamaan bro, nyerah. coba tanya yang lebih gampang"
 )
+
+// assemblePrompt assembles the wire message list:
+//
+//	[system message]  = system prompt + guild memory block (empty in v1)
+//	[channel history] append-only session
+//	[current message]
+//
+// Memory is concatenated onto the system prompt string, not a separate
+// message — the prefix cache keys off literal bytes, and one system message
+// is simpler. Empty memory leaves the system message byte-identical.
+func assemblePrompt(systemPrompt, memory string, history []llm.Message, current llm.Message) []llm.Message {
+	system := systemPrompt
+	if memory != "" {
+		system += "\n\n" + memory
+	}
+	msgs := make([]llm.Message, 0, len(history)+2)
+	msgs = append(msgs, llm.Message{Role: "system", Content: system})
+	msgs = append(msgs, history...)
+	return append(msgs, current)
+}
+
+// userMessage prefixes content with the speaker's name — the OpenAI "name"
+// field is not reliably honored by DeepSeek, so the prefix lives in content.
+// Same shape as the bootstrap transcript lines.
+func userMessage(username, content string) llm.Message {
+	return llm.Message{Role: "user", Content: username + ": " + content}
+}
