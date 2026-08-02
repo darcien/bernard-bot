@@ -338,16 +338,19 @@ func regionBytes(region [][]llm.Message) int {
 //
 // recentKeep units survive whatever they estimate at. A budget in tokens
 // rather than a unit count is what stops two big fetch turns holding the
-// session over the trigger and re-firing the fold every turn.
+// session over the trigger and re-firing the fold every turn, and
+// compactTarget keeps that budget under half the window whatever the window
+// turns out to be.
 //
 // The budget covers history only. The system prompt and the current question
 // ride on top of it, as they do for Reasonix, whose pinned prefix is likewise
 // outside the tail.
 func planRegion(units [][]llm.Message, tokPerByte float64) (region, tail [][]llm.Message) {
+	budget := min(tailBudget, int(contextWindow*compactTarget))
 	start, acc := len(units), 0
 	for i := len(units) - 1; i >= 0; i-- {
 		cost := int(float64(unitSize(units[i])) * tokPerByte)
-		if len(units)-i > recentKeep && acc+cost > tailBudget {
+		if len(units)-i > recentKeep && acc+cost > budget {
 			break
 		}
 		acc += cost

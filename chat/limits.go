@@ -19,11 +19,16 @@ const (
 	forceRatio   = 0.9
 	// tailBudget is what maintenance keeps verbatim, in tokens — Reasonix's
 	// tail budget, and what the region is measured against once compactRatio
-	// fires. They cap it at compactTarget (0.5) of the window; at 1M that cap
-	// never binds, so it is not carried. A token budget, not a unit count, so
-	// a couple of large tool results can't hold the session over the trigger
-	// and re-fire the fold every turn.
-	tailBudget = 16384
+	// fires. A token budget, not a unit count, so a couple of large tool
+	// results can't hold the session over the trigger and re-fire the fold
+	// every turn.
+	//
+	// compactTarget caps it against the window, as theirs does. At 1M the cap
+	// never binds; it earns its place the day contextWindow names a smaller
+	// model, when a fixed 16384 could otherwise keep a tail bigger than half
+	// the window and leave the fold unable to clear its own trigger.
+	tailBudget    = 16384
+	compactTarget = 0.5
 	// recentKeep is the fewest units maintenance will leave, Reasonix's
 	// minRecentKeep: the current question and the exchange before it survive
 	// even when one of them alone exceeds the budget.

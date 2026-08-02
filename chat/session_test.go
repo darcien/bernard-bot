@@ -338,3 +338,22 @@ func TestUnitSize_CountsToolCallArguments(t *testing.T) {
 		t.Errorf("want arguments counted in size, got %d", got)
 	}
 }
+
+// The tail budget is capped against the window, not just fixed: a small
+// window with a fixed 16384-token tail could keep more than the fold is
+// trying to free, and never clear its own trigger.
+func TestPlanRegion_TailBudgetIsCappedByTheWindow(t *testing.T) {
+	if got, want := min(tailBudget, int(contextWindow*compactTarget)), tailBudget; got != want {
+		t.Fatalf("at this window the fixed budget should win, got %d", got)
+	}
+	// A tail worth more than the budget must still leave a region to fold.
+	big := tailBudget * 8 // bytes; at 1 tok/byte each unit alone exceeds it
+	units := [][]llm.Message{textUnit(big), textUnit(big), textUnit(big), textUnit(big)}
+	region, tail := planRegion(units, 1.0)
+	if len(tail) != recentKeep {
+		t.Errorf("want the tail held at recentKeep, got %d", len(tail))
+	}
+	if len(region) != len(units)-recentKeep {
+		t.Errorf("want everything older folded, got %d", len(region))
+	}
+}
