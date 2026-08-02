@@ -61,6 +61,18 @@ const (
 	// the following prompt unchecked. Five rounds at this cap is ~51k tokens,
 	// 5% of the window.
 	toolResultCap = 32 * 1024
+	// citationURLCap bounds the URL in the "[N] source: <url>" line the loop
+	// prefixes onto an already-capped result: without it, a long URL — the
+	// model chooses it — pushes the tool message past toolResultCap by
+	// however long the URL is.
+	//
+	// 2048 is the practical ceiling for a URL that works at all: the limit
+	// legacy browsers imposed and the one most servers still default near, so
+	// a longer one has very likely already failed to fetch. Past it the line
+	// says the URL was omitted rather than showing a cut one — a truncated
+	// URL is a broken link that looks like a working link, and the footer the
+	// user reads renders the source whole from the harness's own record.
+	citationURLCap = 2048
 	// maxConcurrentTurns bounds turns in flight across all channels. No
 	// Reasonix analogue: they run one task per session key and never cap
 	// across keys. This bounds connections to the LLM endpoint, a deployment

@@ -17,6 +17,7 @@ import (
 type sourcedTool struct {
 	calls  int
 	source string
+	result string // when set, returned instead of the default page text
 }
 
 func (s *sourcedTool) Name() string            { return "fetch" }
@@ -27,6 +28,9 @@ func (s *sourcedTool) Source(json.RawMessage) string {
 }
 func (s *sourcedTool) Execute(context.Context, json.RawMessage) (string, error) {
 	s.calls++
+	if s.result != "" {
+		return s.result, nil
+	}
 	return "page text", nil
 }
 
@@ -294,5 +298,81 @@ func TestRunToolLoop_GraceRound(t *testing.T) {
 		if strings.Contains(m.Content, graceNudge) {
 			t.Error("want nudge excluded from produced messages")
 		}
+	}
+}
+
+// The citation line is prefixed after the registry has capped the result, so
+// a long URL — the model picks it — would otherwise push the tool message
+// past toolResultCap by however long that URL is.
+func TestRunToolLoop_CitationLineCannotBlowTheCap(t *testing.T) {
+	longURL := "https://example.com/" + strings.Repeat("a", citationURLCap*2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "\"role\":\"tool\"") {
+			_, _ = w.Write([]byte(finalReply("done")))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"",
+			"tool_calls":[{"id":"c1","type":"function","function":{"name":"fetch","arguments":"{}"}}]}}]}`))
+	}))
+	defer srv.Close()
+
+	reg := tools.NewRegistry(toolResultCap, &sourcedTool{source: longURL, result: strings.Repeat("x", toolResultCap*2)})
+	res, err := runToolLoop(context.Background(), llm.NewClient(srv.URL, "k", "m"), reg,
+		[]llm.Message{{Role: "user", Content: "u: go"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var toolMsg llm.Message
+	for _, m := range res.produced {
+		if m.Role == "tool" {
+			toolMsg = m
+		}
+	}
+	if toolMsg.Content == "" {
+		t.Fatal("want a tool result recorded")
+	}
+	over := len(toolMsg.Content) - toolResultCap
+	if over > citationURLCap {
+		t.Errorf("want the citation line bounded, result runs %d bytes over the cap", over)
+	}
+	// A cut URL is a broken link that looks like a working one, so the line
+	// says the URL is missing instead of showing part of it.
+	if strings.Contains(toolMsg.Content, longURL[:100]) {
+		t.Error("want no part of the oversized URL shown to the model")
+	}
+	// The origin survives, because naming where something came from is what
+	// the model needs the source for.
+	if !strings.Contains(toolMsg.Content, "https://example.com/…") {
+		t.Errorf("want the origin kept and the path elided, got %q", toolMsg.Content[:120])
+	}
+	// The footer still cites the whole URL: only the model's copy is bounded.
+	if len(res.sources) != 1 || res.sources[0] != longURL {
+		t.Error("want the full URL recorded as the source")
+	}
+}
+
+func TestCitationLabel(t *testing.T) {
+	short := "https://example.com/a/b?c=d"
+	if got := citationLabel(short); got != short {
+		t.Errorf("want a normal URL untouched, got %q", got)
+	}
+
+	long := "https://news.example.com/" + strings.Repeat("x", citationURLCap)
+	got := citationLabel(long)
+	if !strings.HasPrefix(got, "https://news.example.com/…") {
+		t.Errorf("want the origin kept, got %q", got)
+	}
+	if len(got) > citationURLCap {
+		t.Errorf("want the label bounded, got %d bytes", len(got))
+	}
+	if strings.Contains(got, "xxxx") {
+		t.Error("want the path gone rather than cut")
+	}
+
+	// Not every source is parseable; a tool can report anything as its origin.
+	if got := citationLabel(strings.Repeat("%", citationURLCap+1)); !strings.Contains(got, "too long") {
+		t.Errorf("want the unparseable case named, got %q", got)
 	}
 }

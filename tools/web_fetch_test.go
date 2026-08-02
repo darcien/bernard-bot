@@ -12,7 +12,7 @@ import (
 )
 
 func newTestFetch() *WebFetch {
-	f := NewWebFetch(5*time.Second, 4000)
+	f := NewWebFetch(5 * time.Second)
 	f.allowLocal = true // httptest listens on loopback
 	return f
 }
@@ -137,7 +137,7 @@ func TestWebFetch_RefusesNonHTTPSchemes(t *testing.T) {
 // default (allowLocal is test-only), so loopback literals, names resolving
 // to loopback, and the cloud metadata address all refuse before connecting.
 func TestWebFetch_BlocksPrivateAddresses(t *testing.T) {
-	f := NewWebFetch(2*time.Second, 4000) // guard ON
+	f := NewWebFetch(2 * time.Second) // guard ON
 
 	for _, u := range []string{
 		"http://127.0.0.1:1/",

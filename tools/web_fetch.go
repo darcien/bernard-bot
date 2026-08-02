@@ -53,15 +53,19 @@ const acceptHeader = "text/markdown," +
 // validates resolved IPs at dial time — resolving inside the dialer (rather
 // than check-then-connect) closes the DNS-rebinding gap, and redirects are
 // covered for free because every hop goes through the same dialer.
+//
+// It returns the whole extracted text. How much of that reaches the model is
+// the registry's decision, applied to every tool alike — a cap here would be
+// the same policy in a second place, kept in step only by being handed the
+// same constant.
 type WebFetch struct {
-	client    *http.Client
-	resultCap int
+	client *http.Client
 	// allowLocal disables the private-IP guard; tests only.
 	allowLocal bool
 }
 
-func NewWebFetch(timeout time.Duration, resultCap int) *WebFetch {
-	f := &WebFetch{resultCap: resultCap}
+func NewWebFetch(timeout time.Duration) *WebFetch {
+	f := &WebFetch{}
 	f.client = &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
@@ -148,37 +152,32 @@ func (f *WebFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 
 	contentType := resp.Header.Get("Content-Type")
 	content, format := readable(string(body), contentType)
-	text := TruncateHeadTail(content, f.resultCap)
 
 	// Transport facts only — what the tool layer can't see: where the
 	// request actually landed after redirects, which representation the
-	// server gave us, and how much survived conversion and truncation.
+	// server gave us, and how much survived conversion. What survived the cap
+	// is the registry's line to log, as `truncated_from`.
 	attrs := []any{
 		"url", resp.Request.URL.String(), // post-redirect
 		"status", resp.StatusCode,
 		"type", contentType,
 		"format", format,
 		"bytes", len(body),
-		"text_bytes", len(text),
+		"text_bytes", len(content),
 		"dur", time.Since(start).Round(time.Millisecond),
-	}
-	// How much of the page the model never saw. Without this, a cap that
-	// silently discards most of a page looks identical to a short page.
-	if dropped := len(content) - len(text); dropped > 0 {
-		attrs = append(attrs, "full_bytes", len(content), "dropped_bytes", dropped)
 	}
 	if len(body) == webFetchBodyLimit {
 		attrs = append(attrs, "body_limit_hit", true)
 	}
 	// A big page that extracts to almost nothing is a JS-rendered site, not a
-	// short page — and nothing was truncated, so dropped_bytes stays absent
-	// and the two look identical. The model answers from the scraps either
-	// way; this is the only thing that says which happened.
+	// short page. Nothing is truncated in that case, so the registry logs no
+	// truncated_from and the two look identical; this is the only thing that
+	// says which happened.
 	if len(body) >= thinExtractMinBytes && len(content)*thinExtractRatio < len(body) {
 		attrs = append(attrs, "thin", true)
 	}
 	slog.Debug("web fetch", append(attrs, logid.Attrs(ctx)...)...)
-	return text, nil
+	return content, nil
 }
 
 // readable turns a response body into text for the model, and names the

@@ -47,7 +47,7 @@ func New(client *llm.Client, botID string) *Service {
 		botID: botID,
 		tools: tools.NewRegistry(toolResultCap,
 			tools.CurrentTime{},
-			tools.NewWebFetch(webFetchTimeout, toolResultCap),
+			tools.NewWebFetch(webFetchTimeout),
 		),
 		admission: newAdmission(maxConcurrentTurns),
 		sessions:  make(map[string]*session),

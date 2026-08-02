@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"slices"
 	"time"
 
@@ -46,6 +47,22 @@ type loopResult struct {
 	// sources[0] is "[1]". Recorded by the harness, never by the model, so
 	// a citation can't name a page that was never fetched.
 	sources []string
+}
+
+// citationLabel is what the model is shown as the source of a result. The
+// line rides on top of an already-capped result, so an over-long URL has to
+// be bounded — but cutting one yields a broken link wearing the shape of a
+// working one. Keep the origin instead: it is the part the model needs to
+// name where something came from, it parses unambiguously, and the elision is
+// visible. The user's footer renders the source whole either way.
+func citationLabel(source string) string {
+	if len(source) <= citationURLCap {
+		return source
+	}
+	if u, err := url.Parse(source); err == nil && u.Host != "" {
+		return u.Scheme + "://" + u.Host + "/… (long url, full link in the sources list)"
+	}
+	return "(url too long to show here; it is in the sources list)"
 }
 
 // cite returns the citation number for a source, reusing the number if the
@@ -108,7 +125,8 @@ func runToolLoop(ctx context.Context, client *llm.Client, reg *tools.Registry, p
 			if source != "" {
 				// Hand the model the citation number along with the
 				// content, so it can cite without inventing a URL.
-				result = fmt.Sprintf("[%d] source: %s\n\n%s", res.cite(source), source, result)
+				result = fmt.Sprintf("[%d] source: %s\n\n%s",
+					res.cite(source), citationLabel(source), result)
 			}
 			record(llm.Message{Role: "tool", Content: result, ToolCallID: call.ID})
 		}
