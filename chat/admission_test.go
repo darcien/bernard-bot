@@ -116,3 +116,21 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not met before deadline")
 }
+
+// tryEnter must take a free slot every time: a fold that is skipped when the
+// endpoint is idle would leave the session over the trigger for no reason.
+func TestAdmission_TryEnterTakesAFreeSlot(t *testing.T) {
+	a := newAdmission(1)
+	for range 100 {
+		if !a.tryEnter() {
+			t.Fatal("want a free slot taken")
+		}
+		a.leave()
+	}
+	if !a.tryEnter() {
+		t.Fatal("want the last slot")
+	}
+	if a.tryEnter() {
+		t.Error("want a refusal with no slot free")
+	}
+}

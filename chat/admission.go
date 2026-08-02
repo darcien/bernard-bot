@@ -31,6 +31,19 @@ func newAdmission(n int) *admission {
 	return &admission{slots: make(chan struct{}, n)}
 }
 
+// tryEnter admits one turn only if a slot is free right now, for work that
+// would rather be skipped than queued. It cannot be enter with a zero wait:
+// select picks at random among ready cases, so an already-expired timer would
+// refuse a free slot about half the time.
+func (a *admission) tryEnter() bool {
+	select {
+	case a.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
 // enter admits one turn, waiting at most wait for room. It returns errBusy
 // when the wait expires — past that the channel has moved on, and an honest
 // refusal beats a stale answer — or the context error when the service is
