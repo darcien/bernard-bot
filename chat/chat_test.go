@@ -466,7 +466,9 @@ func TestHandleMention_SteeredMentionRequeuedWhenTheTurnFails(t *testing.T) {
 			<-release
 			_, _ = w.Write([]byte(callsTool))
 		case 2:
-			http.Error(w, "boom", http.StatusInternalServerError)
+			// 400, not 500: a retryable status would be retried, and this
+			// test is about what a failed turn does, not about retrying.
+			http.Error(w, "boom", http.StatusBadRequest)
 		default:
 			_, _ = w.Write([]byte(finalReply("ok")))
 		}
@@ -508,7 +510,7 @@ func TestHandleMention_CollectedMentionRunsAfterAFailedTurn(t *testing.T) {
 	s := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
 		if calls.Add(1) == 1 {
 			<-release
-			http.Error(w, "boom", http.StatusInternalServerError)
+			http.Error(w, "boom", http.StatusBadRequest) // not retryable; fails the turn
 			return
 		}
 		_, _ = w.Write([]byte(finalReply("ok")))

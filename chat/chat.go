@@ -126,12 +126,72 @@ func (s *Service) serve(msg discord.Message, question string) {
 	}
 	for {
 		s.reply(msg.ChannelID, s.runTurn(msg, question))
+		s.maintain(msg, sess)
 		next, ok := sess.finish()
 		if !ok {
 			return
 		}
 		msg, question = next, stripMention(next.Content, s.botID)
 	}
+}
+
+// maintain runs context maintenance once the answer is out, so the user never
+// waits behind a fold. It is its own unit of work and logs its own line;
+// nothing about it belongs in the turn's.
+//
+// The paid part takes an admission slot like any other endpoint call, but
+// only if one is free. Queueing for it would hold the session lock and the
+// serve loop — so the next mention in this channel would wait out someone
+// else's turn before its own could start — to buy a fold that is not urgent:
+// the trigger is still over threshold next turn, and by then a slot may be
+// free.
+func (s *Service) maintain(msg discord.Message, sess *session) {
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	if !sess.needsMaintenance() {
+		return
+	}
+
+	// Per-run, so one turn's maintenance never reports the previous one's.
+	sess.foldedUnits, sess.foldedBytes = 0, 0
+	sess.snippedResults, sess.snippedBytes = 0, 0
+	sess.prunedResults, sess.prunedBytes = 0, 0
+
+	start := time.Now()
+	tier := contextTier(sess.lastPromptTokens)
+	folded := false
+	sess.maintain(func(region [][]llm.Message, tokPerByte float64) ([]llm.Message, bool) {
+		if !s.admission.tryEnter() {
+			slog.Debug("chat fold skipped, no slot", "channel", msg.ChannelID)
+			return nil, false
+		}
+		defer s.admission.leave()
+		folded = true
+		return summariseRegion(s.ctx, s.llm, region, tokPerByte), true
+	})
+
+	did := sess.snippedResults > 0 || sess.prunedResults > 0 || sess.foldedUnits > 0
+	if !did {
+		return // over the tier but nothing was eligible; nothing to report
+	}
+	attrs := []any{"channel", msg.ChannelID, "turn", msg.ID, "tier", tier,
+		"history", len(sess.units), "session_bytes", sess.size()}
+	if sess.snippedResults > 0 {
+		attrs = append(attrs, "snipped_results", sess.snippedResults, "snipped_bytes", sess.snippedBytes)
+	}
+	if sess.prunedResults > 0 {
+		attrs = append(attrs, "pruned_results", sess.prunedResults, "pruned_bytes", sess.prunedBytes)
+	}
+	if sess.foldedUnits > 0 {
+		attrs = append(attrs, "folded_units", sess.foldedUnits, "folded_bytes", sess.foldedBytes,
+			"summarised", folded)
+	}
+	if sess.compactStuck {
+		// The tail alone is over the trigger: folding again would pay for a
+		// summary that cannot help.
+		attrs = append(attrs, "stuck", true)
+	}
+	slog.Info("chat maintain", append(attrs, "dur", time.Since(start).Round(time.Millisecond))...)
 }
 
 // runTurn answers one mention under admission. The typing indicator
@@ -165,9 +225,6 @@ func (s *Service) answer(msg discord.Message, question string) string {
 	sess := s.sessionFor(msg.ChannelID)
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
-	// Per-turn, so a failed turn (which commits nothing) doesn't report the
-	// previous turn's eviction as its own.
-	sess.trimmedUnits, sess.trimmedBytes = 0, 0
 
 	// The triggering message is usually in the fetch too; it enters the
 	// prompt as the current turn instead.
@@ -204,6 +261,10 @@ func (s *Service) answer(msg discord.Message, question string) string {
 
 	prompt := buildContext(systemPrompt, "", append(sess.history(), delta...), current)
 	res, err := runToolLoop(ctx, s.llm, s.tools, prompt, steer)
+	// Before maintain reads it at the end of the turn. A failed run returns an
+	// empty result, so there is nothing to record and observe ignores it
+	// rather than discarding the last good sample.
+	sess.observe(res.lastPromptBytes, res.lastPromptTokens)
 	reply := res.reply
 	cited := 0
 	switch {
@@ -246,10 +307,6 @@ func (s *Service) answer(msg discord.Message, question string) string {
 		}
 	}
 
-	// A failed run returns an empty result, so there is nothing to record
-	// and observe ignores it rather than discarding the last good sample.
-	sess.observe(res.lastPromptBytes, res.lastPromptTokens)
-
 	s.logAnswer(msg, sess, res, reply, len(delta), cited, time.Since(start), err)
 	return reply
 }
@@ -280,22 +337,17 @@ func (s *Service) logAnswer(msg discord.Message, sess *session, res loopResult, 
 		attrs = append(attrs, "steers", res.steers)
 	}
 	// Context pressure: what the largest prompt measured and cost, the share
-	// of the window it used, the ratio between them, and the escalation tier
-	// it would have hit. prompt_bytes is here because it is the denominator
-	// of tok_per_byte — without it the ratio can't be checked, and neither
-	// can the gap against session_bytes, which counts history alone.
-	// Nothing acts on these yet — see docs/plan-context.md.
+	// of the window it used, the ratio between them, and the tier it earns —
+	// the inputs maintenance acts on, recorded where the turn can be read
+	// against the run that follows it. prompt_bytes is here because it is the
+	// denominator of tok_per_byte: without it the ratio can't be checked, and
+	// neither can the gap against session_bytes, which counts history alone.
 	attrs = append(attrs,
 		"prompt_bytes", res.lastPromptBytes,
 		"ctx_pct", contextPct(res.lastPromptTokens),
 		"tok_per_byte", round3(sess.tokPerByte()))
 	if t := contextTier(res.lastPromptTokens); t != "" {
 		attrs = append(attrs, "tier", t)
-	}
-	// Eviction, named at the moment it happens rather than left to be
-	// inferred from history falling between two turns.
-	if sess.trimmedUnits > 0 {
-		attrs = append(attrs, "trimmed_units", sess.trimmedUnits, "trimmed_bytes", sess.trimmedBytes)
 	}
 	if len(res.sources) > 0 {
 		// cited < sources means the model ignored its citation markers and

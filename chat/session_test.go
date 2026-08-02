@@ -265,37 +265,65 @@ func TestContextTier(t *testing.T) {
 	}
 }
 
-func TestTrimUnits(t *testing.T) {
-	t.Run("under budget stays untouched", func(t *testing.T) {
-		units := [][]llm.Message{textUnit(10), textUnit(10)}
-		got, dropped, bytes := trimUnits(units, 100, 50)
-		if len(got) != 2 || dropped != 0 || bytes != 0 {
-			t.Errorf("want 2 units and no trim, got %d units, dropped %d (%d bytes)", len(got), dropped, bytes)
+func TestPlanRegion(t *testing.T) {
+	// One unit per turn, so the tail boundary is always a turn boundary and a
+	// tool result can never be split from its call.
+	t.Run("everything fits the budget", func(t *testing.T) {
+		units := [][]llm.Message{textUnit(100), textUnit(100)}
+		region, tail := planRegion(units, 0.32)
+		if len(region) != 0 || len(tail) != 2 {
+			t.Errorf("want nothing to compact, got region %d tail %d", len(region), len(tail))
 		}
 	})
 
-	t.Run("over budget drops oldest until under floor", func(t *testing.T) {
-		units := [][]llm.Message{textUnit(40), textUnit(40), textUnit(40)}
-		got, dropped, bytes := trimUnits(units, 100, 50) // total 120+roles > 100
-		if len(got) != 1 {
-			t.Fatalf("want 1 unit left, got %d", len(got))
+	t.Run("older units fall outside the tail", func(t *testing.T) {
+		big := tailBudget * 4 // bytes; at 0.5 tok/byte, two of these overflow
+		units := [][]llm.Message{textUnit(big), textUnit(big), textUnit(big), textUnit(big)}
+		region, tail := planRegion(units, 0.5)
+		if len(region) == 0 {
+			t.Fatal("want a region to compact")
 		}
-		if got[0][0].Content != units[2][0].Content {
-			t.Error("want newest unit kept, oldest dropped")
+		if len(region)+len(tail) != len(units) {
+			t.Errorf("want the split to account for every unit, got %d + %d of %d", len(region), len(tail), len(units))
 		}
-		// The report is what the turn's log line claims was evicted.
-		if dropped != 2 || bytes != unitSize(units[0])+unitSize(units[1]) {
-			t.Errorf("want 2 units reported dropped with their bytes, got %d (%d bytes)", dropped, bytes)
+		if tail[len(tail)-1][0].Content != units[len(units)-1][0].Content {
+			t.Error("want the newest unit in the tail")
 		}
 	})
 
-	t.Run("newest unit survives even alone over the floor", func(t *testing.T) {
-		units := [][]llm.Message{textUnit(10), textUnit(500)}
-		got, _, _ := trimUnits(units, 100, 50)
-		if len(got) != 1 || len(got[0][0].Content) != 500 {
-			t.Errorf("want only the oversized newest unit kept, got %d units", len(got))
+	t.Run("recentKeep units survive any budget", func(t *testing.T) {
+		huge := tailBudget * 100
+		units := [][]llm.Message{textUnit(huge), textUnit(huge), textUnit(huge)}
+		region, tail := planRegion(units, 1.0)
+		if len(tail) != recentKeep || len(region) != len(units)-recentKeep {
+			t.Errorf("want %d units kept, got tail %d region %d", recentKeep, len(tail), len(region))
 		}
 	})
+}
+
+// Maintenance fires on the measured prompt, not on a character count: a session
+// far under the window keeps everything however many bytes it holds.
+func TestSession_MaintainOnlyOverTheTrigger(t *testing.T) {
+	sess := &session{}
+	sess.observe(60000, 20000) // 2% of the window, the old char budget's scale
+	for range 5 {
+		sess.append([]llm.Message{{Role: "user", Content: strings.Repeat("x", 20000)}})
+		sess.maintain(failFold(t))
+	}
+	if len(sess.units) != 5 || sess.foldedUnits != 0 {
+		t.Errorf("want all 5 units kept, got %d (trimmed %d)", len(sess.units), sess.foldedUnits)
+	}
+
+	// Over the trigger, maintenance folds down to the tail budget.
+	sess.observe(60000, int(contextWindow*forceRatio))
+	sess.append([]llm.Message{{Role: "user", Content: "over"}})
+	sess.maintain(stubFold)
+	if sess.foldedUnits == 0 {
+		t.Fatal("want a fold once the measured prompt crosses the trigger")
+	}
+	if got := int(float64(sess.size()) * sess.tokPerByte()); got > tailBudget {
+		t.Errorf("want the session at or under the tail budget %d tokens, got %d", tailBudget, got)
+	}
 }
 
 func TestUnitSize_CountsToolCallArguments(t *testing.T) {

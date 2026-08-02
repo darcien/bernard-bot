@@ -17,18 +17,50 @@ const (
 	snipRatio    = 0.6
 	compactRatio = 0.8
 	forceRatio   = 0.9
+	// tailBudget is what maintenance keeps verbatim, in tokens — Reasonix's
+	// tail budget, and what the region is measured against once compactRatio
+	// fires. They cap it at compactTarget (0.5) of the window; at 1M that cap
+	// never binds, so it is not carried. A token budget, not a unit count, so
+	// a couple of large tool results can't hold the session over the trigger
+	// and re-fire the fold every turn.
+	tailBudget = 16384
+	// recentKeep is the fewest units maintenance will leave, Reasonix's
+	// minRecentKeep: the current question and the exchange before it survive
+	// even when one of them alone exceeds the budget.
+	recentKeep = 2
+	// Snip geometry, Reasonix's: minSnipBytes is their minPruneBytes, the
+	// size below which rewriting a result saves less than the marker costs;
+	// the line counts are their web_fetch SnipHint, generous head and short
+	// tail because a fetched page front-loads. The byte pair is the fallback
+	// for content with too few lines to split — one long line of JSON.
+	minSnipBytes  = 1024
+	snipHead      = 120
+	snipTail      = 12
+	snipHeadBytes = 12000
+	snipTailBytes = 2000
+	// Summarisation guards, Reasonix's: a fold smaller than minFoldTokens
+	// saves less than the call costs; summaryTimeout bounds a stalled
+	// summariser; a user turn under pinnedUserTokens is kept verbatim rather
+	// than summarised, because a fact someone stated is not the harness's to
+	// paraphrase. maxConsecutiveCompacts is their stuck latch: two folds in a
+	// row that fail to clear the trigger mean the tail alone exceeds it, and
+	// re-firing every turn is the loop it prevents.
+	minFoldTokens          = 400
+	summaryTimeout         = 90 * time.Second
+	pinnedUserTokens       = 1500
+	maxConsecutiveCompacts = 2
 
 	turnTimeout       = 5 * time.Minute  // whole turn; well under any ceiling
 	webFetchTimeout   = 15 * time.Second // fits inside one call round
 	graceMinRemaining = 90 * time.Second // one LLM call + reply headroom
 	maxToolRounds     = 5                // loop cap before the grace round
-	// toolResultCap is runes per tool result. Sized when the window was
-	// believed to be 128k; against 1M it is a fraction of a percent and still
-	// truncates link-heavy pages, dropping headlines the user can see. See
-	// docs/plan-context.md.
-	toolResultCap = 12000
-	sessionBudget = 60000 // chars; trim trigger, sized for a couple of fetches
-	sessionFloor  = 40000 // chars; trim target (hysteresis pair)
+	// toolResultCap is bytes per tool result, Reasonix's maxToolOutputBytes.
+	// Bytes to match unitSize, which the region is planned in. It exists to
+	// stop one huge read making the *next* request too big: maintenance only
+	// runs after the reply, so an oversized result would otherwise sail into
+	// the following prompt unchecked. Five rounds at this cap is ~51k tokens,
+	// 5% of the window.
+	toolResultCap = 32 * 1024
 	// maxConcurrentTurns bounds turns in flight across all channels. No
 	// Reasonix analogue: they run one task per session key and never cap
 	// across keys. This bounds connections to the LLM endpoint, a deployment

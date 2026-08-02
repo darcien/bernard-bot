@@ -34,10 +34,21 @@ type session struct {
 	// tokens the provider charged for it. Guarded by mu.
 	lastPromptBytes  int
 	lastPromptTokens int
-	// trimmed* are what the last append evicted, for that turn's log line.
+	// What the last maintenance run did, for its log line: folded* is what
+	// left the session, snipped* and pruned* what was shortened in place.
 	// Guarded by mu.
-	trimmedUnits int
-	trimmedBytes int
+	foldedUnits    int
+	foldedBytes    int
+	snippedResults int
+	snippedBytes   int
+	prunedResults  int
+	prunedBytes    int
+	// consecutiveCompacts and compactStuck are Reasonix's latch: a fold that
+	// does not buy breathing room means the tail alone is over the trigger,
+	// so folding every turn would burn a summariser call for nothing.
+	// Guarded by mu.
+	consecutiveCompacts int
+	compactStuck        bool
 }
 
 // Token estimation mirrors Reasonix's tokPerChar: one sample from the last
@@ -52,8 +63,9 @@ const (
 	maxTokPerByte      = 2.0
 )
 
-// contextTier names the escalation Reasonix would run at this prompt size,
-// or "" below the first one. Reporting only; nothing acts on it yet.
+// contextTier names the escalation this prompt size earns, or "" below the
+// first one. It labels the log line; maintain compares the same thresholds
+// itself rather than switching on this string.
 func contextTier(promptTokens int) string {
 	switch {
 	case promptTokens >= int(contextWindow*forceRatio):
@@ -191,9 +203,9 @@ func (s *session) finish() (discord.Message, bool) {
 	return newest, true
 }
 
-// size is the session's total unitSize, the quantity sessionBudget trims
-// against. Reported so the approach to that budget is visible before it
-// fires. Caller must hold s.mu.
+// size is the session's total unitSize, the quantity planRegion measures.
+// Reported so the approach to the tail budget is visible before it matters.
+// Caller must hold s.mu.
 func (s *session) size() int {
 	total := 0
 	for _, u := range s.units {
@@ -212,38 +224,136 @@ func (s *session) history() []llm.Message {
 	return msgs
 }
 
-// append adds one turn's messages as a unit and trims to budget. What the
-// trim cost is kept for the turn's log line: an eviction is otherwise only
-// visible by diffing consecutive turns, which is no way to verify that a
-// change stopped it happening.
+// append adds one turn's messages as a unit. Growth is not its problem —
+// maintain handles that, after the reply and against a measured prompt.
 // Caller must hold s.mu.
 func (s *session) append(unit []llm.Message) {
 	if len(unit) == 0 {
 		return
 	}
-	s.units, s.trimmedUnits, s.trimmedBytes = trimUnits(append(s.units, unit), sessionBudget, sessionFloor)
+	s.units = append(s.units, unit)
 }
 
-// trimUnits drops oldest units until the total size is at or under floor —
-// but only when the total exceeds budget (hysteresis: rare, big trims), and
-// never the newest unit, even if it alone exceeds the floor. Returns what it
-// dropped.
-func trimUnits(units [][]llm.Message, budget, floor int) (kept [][]llm.Message, dropped, droppedBytes int) {
+// foldFunc turns the region into the unit that replaces it, or reports false
+// when it could not — in which case the session is left alone rather than
+// losing the region to an empty stand-in. Injected so the session owns the
+// policy and knows nothing about LLM clients or contexts.
+type foldFunc func(region [][]llm.Message, tokPerByte float64) ([]llm.Message, bool)
+
+// needsMaintenance reports whether the last measured prompt earned any work,
+// so a caller can skip the setup when there is nothing to do.
+// Caller must hold s.mu.
+func (s *session) needsMaintenance() bool {
+	return s.lastPromptTokens >= int(contextWindow*snipRatio)
+}
+
+// maintain runs whatever the last measured prompt earned. The trigger is
+// measured, the region estimated: Reasonix likewise acts on the usage of the
+// round that ran and plans the kept tail with its calibrated ratio.
+//
+// The escalation is theirs. Below the snip tier nothing happens, because a
+// rewrite here would crater the cached prefix for no reason. In the snip band
+// stale tool results shrink, which is free — the page can be fetched again.
+// At the compaction tier pruning gets one more free saving, and only if that
+// fails to clear the trigger does the region fold into a summary.
+//
+// It runs between turns rather than inside one: mid-turn, the loop is still
+// building tool_call/result pairs a rewrite would invalidate, and a fold is
+// one more endpoint call the waiting user would be paying for in silence.
+//
+// What it did is recorded for its log line, because otherwise a fold is only
+// visible by diffing consecutive turns — no way to verify that a change
+// stopped one happening.
+//
+// Caller must hold s.mu.
+func (s *session) maintain(fold foldFunc) {
+	tokens := s.lastPromptTokens
+	if tokens < int(contextWindow*compactRatio) {
+		// Breathing room: whatever the last fold bought, it worked, so the
+		// latch and the run count start over.
+		s.consecutiveCompacts, s.compactStuck = 0, false
+	}
+	if tokens < int(contextWindow*snipRatio) {
+		return
+	}
+	region, tail := planRegion(s.units, s.tokPerByte())
+	if len(region) == 0 {
+		return
+	}
+	if tokens < int(contextWindow*compactRatio) {
+		s.snippedResults, s.snippedBytes = snipRegion(region)
+		return
+	}
+
+	// Prune first: eliding stale results is free, and when it alone clears
+	// the trigger the conversation survives whole. Reasonix does the same
+	// ahead of its (paid) summariser call.
+	s.prunedResults, s.prunedBytes = pruneRegion(region)
+	saved := int(float64(s.prunedBytes) * s.tokPerByte())
+	force := tokens >= int(contextWindow*forceRatio)
+	if !force && tokens-saved < int(contextWindow*compactRatio) {
+		return
+	}
+	if s.compactStuck {
+		return
+	}
+	// Below this the fold saves less than the call it costs.
+	if !force && int(float64(regionBytes(region))*s.tokPerByte()) < minFoldTokens {
+		return
+	}
+
+	folded, ok := fold(region, s.tokPerByte())
+	if !ok {
+		return
+	}
+	for _, u := range region {
+		s.foldedBytes += unitSize(u)
+	}
+	s.foldedUnits = len(region)
+	s.units = append([][]llm.Message{folded}, tail...)
+
+	// A healthy fold drops the next prompt under the trigger. Folding on
+	// consecutive turns means the kept tail alone exceeds it, so the loop is
+	// stopped rather than run every turn.
+	s.consecutiveCompacts++
+	if s.consecutiveCompacts >= maxConsecutiveCompacts {
+		s.compactStuck = true
+	}
+}
+
+func regionBytes(region [][]llm.Message) int {
 	total := 0
-	for _, u := range units {
+	for _, u := range region {
 		total += unitSize(u)
 	}
-	if total <= budget {
-		return units, 0, 0
+	return total
+}
+
+// planRegion splits units into the region maintenance may rewrite and the
+// tail it keeps verbatim, walking back from the newest until tailBudget
+// tokens are spoken for. Reasonix's tailStart, over units instead of
+// messages: a unit is one turn, so the boundary can never separate a tool
+// result from the call that asked for it — the alignment step they need
+// falls out of the shape.
+//
+// recentKeep units survive whatever they estimate at. A budget in tokens
+// rather than a unit count is what stops two big fetch turns holding the
+// session over the trigger and re-firing the fold every turn.
+//
+// The budget covers history only. The system prompt and the current question
+// ride on top of it, as they do for Reasonix, whose pinned prefix is likewise
+// outside the tail.
+func planRegion(units [][]llm.Message, tokPerByte float64) (region, tail [][]llm.Message) {
+	start, acc := len(units), 0
+	for i := len(units) - 1; i >= 0; i-- {
+		cost := int(float64(unitSize(units[i])) * tokPerByte)
+		if len(units)-i > recentKeep && acc+cost > tailBudget {
+			break
+		}
+		acc += cost
+		start = i
 	}
-	for len(units) > 1 && total > floor {
-		size := unitSize(units[0])
-		total -= size
-		droppedBytes += size
-		dropped++
-		units = units[1:]
-	}
-	return units, dropped, droppedBytes
+	return units[:start], units[start:]
 }
 
 // unitSize approximates a unit's share of the prompt: every string the wire
